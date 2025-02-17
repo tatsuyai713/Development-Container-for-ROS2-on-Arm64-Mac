@@ -1,4 +1,4 @@
-# Development Container for ROS 2 on Arm64 Mac
+# Development Container (aarch64 and x86_64 on Rosetta )for ROS 2 on Arm64 Mac
 
 This Dockerfile is designed to create a Docker container specifically for ROS 2, optimized for M1/M2 Macs (ARM64 architecture).
 
