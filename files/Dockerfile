@@ -11,6 +11,12 @@ ARG LOCALE="US"
 
 USER root
 
+# Temporary Fix for ROS 2
+RUN rm -rf /etc/apt/sources.list.d/ros2.list
+RUN apt update && sudo apt install curl -y
+RUN curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/1.1.0/ros2-apt-source_1.1.0.jammy_all.deb"
+RUN dpkg -i /tmp/ros2-apt-source.deb
+
 RUN if [ "${LOCALE}" = "JP" ]; then \
     apt update \
     && DEBIAN_FRONTEND=noninteractive apt install -y \
