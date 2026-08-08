@@ -14,7 +14,7 @@ RDPクライアントとSelkies WebRTCによるブラウザのどちらからで
 ## 更新版の主な機能
 
 - Apple Silicon上のApple `container`によるネイティブ`linux/arm64`ビルドと軽量Linux VM
-- Ubuntu 22.04 + ROS 2 Humble Desktop Full、またはUbuntu 24.04 + ROS 2 Jazzy Desktop Full
+- Ubuntu 22.04 + ROS 2 Humble Desktop、またはUbuntu 24.04 + ROS 2 Jazzy Desktop Full
 - `colcon`、`rosdep`、C/C++・Python開発環境、エディター、Git、SSHツール、LibreOffice
 - Selkiesブラウザ接続とXRDPの両方に対応したKDE Plasma
 - 表示言語（`en`/`jp`）とキーボード（`us`/`jp`）の独立選択
@@ -59,8 +59,9 @@ cd /path/to/Development-Container-for-ROS2-on-Arm64-Mac
 ```
 
 ビルドではUbuntu、イメージ名、言語、キーボード、ROS、開発ツール、ビルド用リソースを
-質問します。その後にデスクトップ用パスワードを入力しますが、パスワードは設定ファイルへ
-保存しません。
+質問します。対話ビルドの質問は前回値ではなく、毎回プロジェクト既定値から始まります。その後に
+デスクトップ用パスワードを入力しますが、パスワードは設定ファイルへ保存しません。保存済みの
+ビルド設定を意図的に再利用する場合だけ`./build.sh --non-interactive`を使います。
 
 初回の起動ではポート、表示、タイムゾーン、実行用リソース、マウント、XRDPの有効・無効を質問します。
 回答は`configs/default.env`へ保存し、2回目以降は質問せず再利用します。設定ウィザードを再実行するには
@@ -89,7 +90,7 @@ WebとXRDPではmacOSのユーザー名と`./build.sh`で入力したパスワ�
 
 | Ubuntu | ROSディストリビューション | インストールパッケージ |
 |---|---|---|
-| 22.04 Jammy | ROS 2 Humble | `ros-humble-desktop-full` |
+| 22.04 Jammy | ROS 2 Humble | `ros-humble-desktop` |
 | 24.04 Noble（既定） | ROS 2 Jazzy | `ros-jazzy-desktop-full` |
 
 ROSを省く場合はビルド時に`INSTALL_ROS2=false`を選びます。有効時は`ros-dev-tools`、colcon、
@@ -98,6 +99,10 @@ rosdepも導入します。コンテナの書き込みレイヤーにはworkspac
 読み込みません。必要なshellで
 `source /opt/ros/<distro>/setup.bash`を実行してください。ベースイメージのUbuntu版が選択と
 一致しない場合、ビルドは停止します。
+
+公式Jammy arm64 repositoryには`ros-humble-desktop-full`のbinary packageがないため、22.04では
+対応している`ros-humble-desktop`を使います。Noble arm64には`ros-jazzy-desktop-full`があるため、
+24.04では引き続きDesktop Fullを使います。
 
 ### 言語とキーボード
 
@@ -123,9 +128,9 @@ LibreOffice、`clinfo`などが対象です。小さいイメージが必要な�
 | `./install-container.sh` | Apple公式containerパッケージをインストール |
 | `./setup.sh` | Apple containerサービスを起動・確認 |
 | `./configure.sh` | 保存設定を全て対話編集 |
-| `./build.sh` | 対話設定後にarm64イメージをビルド |
-| `./build.sh --non-interactive` | 保存済みイメージ設定でビルド |
-| `./start.sh` | 保存済み設定で起動し、初回のみ設定ウィザードを実行 |
+| `./build.sh` | 毎回プロジェクト既定値から対話選択してarm64イメージをビルド |
+| `./build.sh --non-interactive` | 明示的に保存済みイメージ設定でビルド |
+| `./start.sh` | 複数設定があれば選択し、選択したコンテナを起動 |
 | `./start.sh --reconfigure` | 実行設定を対話編集してコンテナを再作成 |
 | `./start.sh --recreate` | コンテナを置き換えて現在の実行設定を再適用 |
 | `./start.sh --non-interactive` | 保存済み設定で起動し、実行設定が未完了なら失敗 |
@@ -140,15 +145,24 @@ LibreOffice、`clinfo`などが対象です。小さいイメージが必要な�
 
 BuildとStartは`--config path`にも対応するため、設定を分けた複数デスクトップを管理できます。
 
+`configs/`に生成済み`.env`が複数ある場合、通常の`./start.sh`は最初にファイル名、Ubuntu版、
+コンテナ名、イメージ名の一覧を表示します。選択後、その設定が初回起動かを判定し、必要な場合だけ
+実行設定ウィザードを開きます。`--config`を指定すると選択を省略します。複数設定がある状態で
+`--non-interactive`を使う場合は、`--config`による明示指定が必要です。
+
 自動生成するコンテナ名、イメージ名、volume名にはUbuntu版が入ります。例えば
 `development-container-for-ros2-on-arm64-mac-$USER-u22.04`と、対応する`-u24.04`名です。
 1つの設定ファイルを毎回書き換えず両方を管理するには、Ubuntu版ごとに設定を分けます。
 
 ```bash
 ./build.sh --config configs/22.04.env
-./start.sh --config configs/22.04.env
-
 ./build.sh --config configs/24.04.env
+
+# メニューから22.04または24.04を選択
+./start.sh
+
+# またはメニューを省略して直接指定
+./start.sh --config configs/22.04.env
 ./start.sh --config configs/24.04.env
 ```
 
@@ -172,6 +186,11 @@ named volumeを保持し、コンテナの書き込みレイヤーを破棄し�
 
 デスクトップの文字・フォント描画では設定済みの`DPI`を常に使用します。Retinaブラウザからの
 device pixel ratioでは上書きされず、`STREAM_SCALE`は配信画面の寸法だけを変更します。
+
+Ubuntu 22.04 arm64では`kde-selkies-webtop-devcontainer`と同じwheel上書き方式を使い、checksumを
+固定したJammy互換PixelFlux wheelを明示的に導入します。新しいarm64 wheelの同梱FFmpegが参照する
+`vaMapBuffer2`をJammyのlibvaが提供しないためです。Ubuntu 24.04ではベースイメージ付属の
+PixelFluxをそのまま使います。
 
 タイムゾーンの既定値は設定初期化時にMacから検出し、取得できない場合だけ`UTC`を使います。
 
@@ -248,8 +267,9 @@ envファイルへ書きます。ビルド設定はイメージ内のファイ�
 
 Apple BuildKitが`Containerfile`と選択したKDE/Selkies arm64ベースを読み込みます。最初に
 `rootfs/install-development.sh`がUbuntu版を検証し、XRDP、XorgXRDP、対応するROS apt source、
-Desktop Full、rosdep、colcon、任意の開発アプリを導入します。Ubuntu 24.04ではPipeWireの
-XRDP moduleも導入します。
+ROS desktop package、rosdep、colcon、任意の開発アプリを導入します。Ubuntu 22.04では旧版と同じ
+PulseAudio 15.99.1方式でXRDP audio moduleを一時build stage内で構築し、Ubuntu 24.04では
+package版のPipeWire XRDP moduleを導入します。
 
 続いて`rootfs/customize-user.sh`がLinuxのユーザー名・UID・GIDをMac側へ合わせ、一時secretから
 Linux・Web認証を設定し、標準ディレクトリを準備します。さらにlocale、XKB、
@@ -270,8 +290,9 @@ captureしてsoftware encodeし、映像・音声をブラウザへ送り、キ�
 目標frame rateを制御します。
 
 RDP経路はコンテナ3389番で待機します。認証後、`xrdp-sesman`が別のXorgXRDP displayを作成し、
-独立したD-Bus sessionで`startplasma-x11`を起動します。両経路は同じLinux accountとstorageを
-使いますが、display serverとapplication processは共有しません。
+独立したD-Bus sessionで`startplasma-x11`を起動します。RDP内のapplicationだけがsession固有の
+`xrdp-sink`と`xrdp-source`を使い、ブラウザ側はSelkies用の`output` sinkを維持します。両経路は
+同じLinux accountとstorageを使いますが、display serverとapplication processは共有しません。
 
 ### 6. 永続化の境界
 

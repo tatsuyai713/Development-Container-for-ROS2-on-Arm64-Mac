@@ -1,5 +1,12 @@
 # syntax=docker/dockerfile:1
 ARG BASE_IMAGE=ghcr.io/tatsuyai713/webtop-kde-base-arm64-u24.04:1.1.0
+
+FROM ${BASE_IMAGE} AS xrdp-pulseaudio-builder
+
+ARG UBUNTU_VERSION=24.04
+COPY rootfs/build-xrdp-pulseaudio.sh /usr/local/libexec/build-xrdp-pulseaudio.sh
+RUN UBUNTU_VERSION="${UBUNTU_VERSION}" /usr/local/libexec/build-xrdp-pulseaudio.sh
+
 FROM ${BASE_IMAGE}
 
 ARG USER_NAME
@@ -30,14 +37,19 @@ ENV HOME="/home/${USER_NAME}" \
 
 COPY rootfs/install-development.sh /usr/local/libexec/install-development.sh
 COPY rootfs/patch-selkies-dpi.sh /usr/local/libexec/patch-selkies-dpi.sh
+COPY rootfs/patch-selkies-audio.py /usr/local/libexec/patch-selkies-audio.py
 RUN UBUNTU_VERSION="${UBUNTU_VERSION}" \
     INSTALL_ROS2="${INSTALL_ROS2}" \
     INSTALL_DEV_TOOLS="${INSTALL_DEV_TOOLS}" \
     /usr/local/libexec/install-development.sh && \
     /usr/local/libexec/patch-selkies-dpi.sh && \
+    python3 /usr/local/libexec/patch-selkies-audio.py && \
     rm -f \
       /usr/local/libexec/install-development.sh \
-      /usr/local/libexec/patch-selkies-dpi.sh
+      /usr/local/libexec/patch-selkies-dpi.sh \
+      /usr/local/libexec/patch-selkies-audio.py
+
+COPY --from=xrdp-pulseaudio-builder /xrdp-pulseaudio-root/ /
 
 COPY rootfs/customize-user.sh /usr/local/libexec/customize-apple-container-user.sh
 COPY assets/kubuntu-kdeglobals /tmp/kubuntu-kdeglobals

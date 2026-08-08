@@ -15,7 +15,8 @@ case "${UBUNTU_VERSION}" in
   22.04)
     ubuntu_codename=jammy
     ros_distro=humble
-    ros_desktop_package=ros-humble-desktop-full
+    # The Humble arm64 repository does not publish the desktop-full meta-package.
+    ros_desktop_package=ros-humble-desktop
     ;;
   24.04)
     ubuntu_codename=noble
@@ -33,6 +34,21 @@ apt-get install --no-install-recommends -y \
 
 if [[ "${UBUNTU_VERSION}" == "24.04" ]]; then
   apt-get install --no-install-recommends -y pipewire-module-xrdp
+fi
+
+if [[ "${UBUNTU_VERSION}" == "22.04" ]]; then
+  # Match the explicit Jammy wheel strategy used by kde-selkies-webtop-devcontainer. Newer
+  # arm64 wheels bundle FFmpeg libraries that require vaMapBuffer2, which Jammy's libva lacks.
+  pixelflux_wheel=pixelflux-1.4.7-cp310-cp310-manylinux_2_28_aarch64.whl
+  pixelflux_url="https://files.pythonhosted.org/packages/4f/6e/832ed1b22373e0a1b80826b5dab8d38634a7f4db2bf7254b0aaea4dfe928/${pixelflux_wheel}"
+  pixelflux_sha256=650ba1dbfafceb8b64ebdbee7e935928a705c341e7bc2336b6c9942bc4b7bcd3
+  curl -fL --retry 3 -o "/tmp/${pixelflux_wheel}" "${pixelflux_url}"
+  printf '%s  %s\n' "${pixelflux_sha256}" "/tmp/${pixelflux_wheel}" | sha256sum -c -
+  PIP_NO_CACHE_DIR=1 /opt/selkies-env/bin/pip install --no-deps --force-reinstall \
+    "/tmp/${pixelflux_wheel}"
+  /opt/selkies-env/bin/python3 -c \
+    'import pixelflux; capture = pixelflux.ScreenCapture(); assert capture._module'
+  rm -f "/tmp/${pixelflux_wheel}"
 fi
 
 if [[ "${INSTALL_DEV_TOOLS}" == "true" ]]; then

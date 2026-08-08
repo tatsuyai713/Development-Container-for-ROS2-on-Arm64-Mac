@@ -85,6 +85,21 @@ SSL_DIR=${SSL_DIR:-}
 # older project versions are treated as already configured for backward compatibility.
 RUNTIME_CONFIGURED=${RUNTIME_CONFIGURED:-${CONFIG_FILE_EXISTED}}
 
+# An interactive build always starts from project defaults instead of presenting the previous
+# build choices as defaults. Runtime settings remain untouched in the shared configuration file.
+saved_ubuntu_version=${UBUNTU_VERSION}
+RESET_BUILD_DEFAULTS=false
+if [[ "${CONFIG_SCOPE}" == "build" ]]; then
+  RESET_BUILD_DEFAULTS=true
+  UBUNTU_VERSION=24.04
+  USER_LANGUAGE=en
+  KEYBOARD_LAYOUT=us
+  INSTALL_ROS2=true
+  INSTALL_DEV_TOOLS=true
+  BUILD_CPUS=4
+  BUILD_MEMORY=8G
+fi
+
 prompt() {
   local variable=$1 label=$2 default_value=$3 answer
   read -r -p "${label} [${default_value}]: " answer
@@ -93,12 +108,18 @@ prompt() {
 
 echo "Container configuration (${CONFIG_SCOPE})"
 if [[ "${CONFIG_SCOPE}" == "all" || "${CONFIG_SCOPE}" == "build" ]]; then
-  previous_ubuntu_version=${UBUNTU_VERSION}
+  previous_ubuntu_version=${saved_ubuntu_version}
   prompt UBUNTU_VERSION "Ubuntu version (22.04/24.04)" "${UBUNTU_VERSION}"
   [[ "${UBUNTU_VERSION}" == "22.04" || "${UBUNTU_VERSION}" == "24.04" ]] || die "Ubuntu version must be 22.04 or 24.04."
+  if [[ "${RESET_BUILD_DEFAULTS}" == "true" ]]; then
+    IMAGE_NAME="${name_prefix}-u${UBUNTU_VERSION}:1.1.0"
+    BASE_IMAGE="ghcr.io/tatsuyai713/webtop-kde-base-arm64-u${UBUNTU_VERSION}:1.1.0"
+  fi
   if [[ "${UBUNTU_VERSION}" != "${previous_ubuntu_version}" ]]; then
-    IMAGE_NAME=${IMAGE_NAME/u${previous_ubuntu_version}/u${UBUNTU_VERSION}}
-    BASE_IMAGE=${BASE_IMAGE/u${previous_ubuntu_version}/u${UBUNTU_VERSION}}
+    if [[ "${RESET_BUILD_DEFAULTS}" != "true" ]]; then
+      IMAGE_NAME=${IMAGE_NAME/u${previous_ubuntu_version}/u${UBUNTU_VERSION}}
+      BASE_IMAGE=${BASE_IMAGE/u${previous_ubuntu_version}/u${UBUNTU_VERSION}}
+    fi
     if [[ "${CONTAINER_NAME}" == "${name_prefix}" ]]; then
       CONTAINER_NAME="${name_prefix}-u${UBUNTU_VERSION}"
     else

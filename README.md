@@ -15,7 +15,7 @@ branches. The `apple-container` branch contains this current implementation.
 ## What the Updated Edition Provides
 
 - Native `linux/arm64` builds and lightweight Linux VMs on Apple Silicon through Apple `container`
-- Ubuntu 22.04 with ROS 2 Humble Desktop Full, or Ubuntu 24.04 with ROS 2 Jazzy Desktop Full
+- Ubuntu 22.04 with ROS 2 Humble Desktop, or Ubuntu 24.04 with ROS 2 Jazzy Desktop Full
 - `colcon`, `rosdep`, C/C++ and Python development tools, editors, Git, SSH tools, and LibreOffice
 - KDE Plasma access through both Selkies in a browser and XRDP
 - Independent display-language (`en`/`jp`) and keyboard-layout (`us`/`jp`) choices
@@ -60,8 +60,10 @@ cd /path/to/Development-Container-for-ROS2-on-Arm64-Mac
 ```
 
 The build asks for the Ubuntu release, image name, language, keyboard, ROS installation,
-development tools, and build resources. It then asks for the desktop password without saving
-that password in the configuration file.
+development tools, and build resources. Each interactive build starts from the project defaults
+rather than using the previous build answers as prompt defaults. It then asks for the desktop
+password without saving that password in the configuration file. Use
+`./build.sh --non-interactive` only when the saved build settings should be reused.
 
 On the first run, the start command asks for ports, display settings, time zone, runtime resources,
 mounts, and whether XRDP is enabled. Answers are saved to `configs/default.env`; later runs reuse
@@ -90,7 +92,7 @@ of the same display. The ports bind to `127.0.0.1` by default and are not expose
 
 | Ubuntu | ROS distribution | Installed desktop package |
 |---|---|---|
-| 22.04 Jammy | ROS 2 Humble | `ros-humble-desktop-full` |
+| 22.04 Jammy | ROS 2 Humble | `ros-humble-desktop` |
 | 24.04 Noble (default) | ROS 2 Jazzy | `ros-jazzy-desktop-full` |
 
 Set `INSTALL_ROS2=false` during the build to omit ROS packages. When enabled, the image also
@@ -99,6 +101,10 @@ writable home layer. Create one in persistent host storage, for example `~/host_
 needed. ROS is not sourced automatically. Enable it only in a shell that needs it with
 `source /opt/ros/<distro>/setup.bash`. The selected base image must match the Ubuntu version;
 the build stops on a mismatch.
+
+The official Jammy arm64 repository does not publish a `ros-humble-desktop-full` binary package,
+so the 22.04 image uses the supported `ros-humble-desktop` package. Noble arm64 does publish
+`ros-jazzy-desktop-full`, which remains the choice for the 24.04 image.
 
 ### Language and keyboard
 
@@ -125,9 +131,9 @@ archive commands, LibreOffice, and `clinfo`. Turn it off when a smaller image is
 | `./install-container.sh` | Install the official Apple container package |
 | `./setup.sh` | Start and inspect Apple container services |
 | `./configure.sh` | Interactively edit all saved settings |
-| `./build.sh` | Interactively configure and build the arm64 image |
-| `./build.sh --non-interactive` | Build with saved image settings |
-| `./start.sh` | Start with saved settings; run the wizard only on the first run |
+| `./build.sh` | Build interactively, starting from project defaults each time |
+| `./build.sh --non-interactive` | Build with explicitly saved image settings |
+| `./start.sh` | Select a configuration when several exist, then start it |
 | `./start.sh --reconfigure` | Interactively update runtime settings and recreate the container |
 | `./start.sh --recreate` | Replace the container and reapply current runtime settings |
 | `./start.sh --non-interactive` | Start with saved settings, or fail if runtime setup is incomplete |
@@ -143,6 +149,11 @@ archive commands, LibreOffice, and `clinfo`. Turn it off when a smaller image is
 Every command accepts the current project defaults. Build and start also accept
 `--config path`; this allows multiple independently configured desktops.
 
+When `configs/` contains multiple generated `.env` files, plain `./start.sh` first displays their
+file name, Ubuntu release, container name, and image name. After selection, it checks that
+configuration's first-run state and opens the runtime wizard only if needed. A direct `--config`
+path bypasses the menu. Non-interactive startup requires `--config` when multiple files exist.
+
 The generated container, image, and volume names include the Ubuntu release, for example
 `development-container-for-ros2-on-arm64-mac-$USER-u22.04` and the corresponding `-u24.04`
 name. To manage both releases without repeatedly changing one file, give each release its own
@@ -150,9 +161,13 @@ configuration:
 
 ```bash
 ./build.sh --config configs/22.04.env
-./start.sh --config configs/22.04.env
-
 ./build.sh --config configs/24.04.env
+
+# Select 22.04 or 24.04 from the menu
+./start.sh
+
+# Or bypass the menu
+./start.sh --config configs/22.04.env
 ./start.sh --config configs/24.04.env
 ```
 
@@ -178,6 +193,11 @@ layer. A rebuild is required only for image-setting changes.
 The configured `DPI` is authoritative for desktop text and font rendering. Retina browser
 device-pixel-ratio reports cannot override it; `STREAM_SCALE` changes only the streamed display
 dimensions.
+
+On Ubuntu 22.04 arm64, the image explicitly installs a checksum-pinned, Jammy-compatible PixelFlux
+wheel, following the wheel override strategy used by `kde-selkies-webtop-devcontainer`. Newer
+arm64 wheels bundle FFmpeg libraries that reference `vaMapBuffer2`, which Jammy's libva does not
+provide. Ubuntu 24.04 continues to use the PixelFlux version supplied by its base image.
 
 The default time zone is detected from the Mac each time configuration is initialized. `UTC` is
 used only if the host setting cannot be determined.
@@ -261,8 +281,10 @@ new runtime settings take effect.
 
 Apple BuildKit reads `Containerfile` and the selected KDE/Selkies arm64 base. First,
 `rootfs/install-development.sh` verifies the Ubuntu release and installs XRDP, XorgXRDP, the
-appropriate ROS apt source, the selected Desktop Full package, rosdep, colcon, and optional
-development applications. On Ubuntu 24.04 it also installs the PipeWire XRDP module.
+appropriate ROS apt source, the selected ROS desktop package, rosdep, colcon, and optional
+development applications. Ubuntu 22.04 builds the PulseAudio XRDP modules using the original
+project's PulseAudio 15.99.1 method in a disposable build stage; Ubuntu 24.04 uses the packaged
+PipeWire XRDP module.
 
 Next, `rootfs/customize-user.sh` aligns the Linux username, UID, and GID with the Mac account,
 sets the Linux and web credentials from the temporary secret, prepares standard directories,
@@ -284,8 +306,10 @@ keyboard, pointer, and microphone input. `STREAM_SCALE` reduces stream resolutio
 of desktop resolution, and `SELKIES_FRAMERATE` controls the requested frame rate.
 
 The RDP path listens on container port 3389. After authentication, `xrdp-sesman` creates a
-separate XorgXRDP display and launches `startplasma-x11` in its own D-Bus session. Both paths use
-the same Linux account and storage, but not the same display server or application processes.
+separate XorgXRDP display and launches `startplasma-x11` in its own D-Bus session. Its applications
+use the session-specific `xrdp-sink` and `xrdp-source`, while the browser session retains the
+Selkies `output` sink. Both paths use the same Linux account and storage, but not the same display
+server or application processes.
 
 ### 6. Persistence boundaries
 
