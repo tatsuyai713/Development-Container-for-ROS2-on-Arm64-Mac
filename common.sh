@@ -49,12 +49,13 @@ load_config() {
   : "${BUILD_MEMORY:?Missing BUILD_MEMORY}"
   : "${SHM_SIZE:?Missing SHM_SIZE}"
 
-  # Use the current English default for configuration files without a language setting.
+  # Use English language and keyboard defaults for older configuration files.
   UBUNTU_VERSION=${UBUNTU_VERSION:-24.04}
   BASE_IMAGE=${BASE_IMAGE:-ghcr.io/tatsuyai713/webtop-kde-base-arm64-u${UBUNTU_VERSION}:1.1.0}
   [[ "${UBUNTU_VERSION}" == "22.04" || "${UBUNTU_VERSION}" == "24.04" ]] || die "UBUNTU_VERSION must be 22.04 or 24.04."
   USER_LANGUAGE=${USER_LANGUAGE:-en}
-  [[ "${USER_LANGUAGE}" == "en" || "${USER_LANGUAGE}" == "ja" ]] || die "USER_LANGUAGE must be en or ja."
+  [[ "${USER_LANGUAGE}" == "ja" ]] && USER_LANGUAGE=jp
+  [[ "${USER_LANGUAGE}" == "en" || "${USER_LANGUAGE}" == "jp" ]] || die "USER_LANGUAGE must be en or jp."
   KEYBOARD_LAYOUT=${KEYBOARD_LAYOUT:-us}
   [[ "${KEYBOARD_LAYOUT}" == "us" || "${KEYBOARD_LAYOUT}" == "jp" ]] || die "KEYBOARD_LAYOUT must be us or jp."
   INSTALL_ROS2=${INSTALL_ROS2:-true}

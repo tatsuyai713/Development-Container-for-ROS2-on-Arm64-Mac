@@ -68,7 +68,7 @@ for directory in Desktop Documents Downloads Music Pictures Videos Templates Pub
   install -d -m 755 "/home/${USER_NAME}/${directory}"
 done
 
-if [[ "${USER_LANGUAGE:-en}" == "ja" ]]; then
+if [[ "${USER_LANGUAGE:-en}" == "jp" ]]; then
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     language-pack-ja-base language-pack-ja im-config fonts-noto-cjk \
@@ -118,10 +118,6 @@ chmod 755 \
   "/home/${USER_NAME}/.xsession"
 
 if [[ -s /etc/ros-distro ]]; then
-  ros_distro=$(< /etc/ros-distro)
-  printf '\n%s\n' "source /opt/ros/${ros_distro}/setup.bash" >> "/home/${USER_NAME}/.bashrc"
-  install -d -m 755 "/home/${USER_NAME}/ros2_ws/src"
-  chown -R "${USER_UID}:${USER_GID}" "/home/${USER_NAME}/ros2_ws"
   su -s /bin/bash - "${USER_NAME}" -c 'rosdep update'
 fi
 

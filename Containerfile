@@ -29,11 +29,15 @@ ENV HOME="/home/${USER_NAME}" \
     GLFW_IM_MODULE="${USER_INPUT_METHOD}"
 
 COPY rootfs/install-development.sh /usr/local/libexec/install-development.sh
+COPY rootfs/patch-selkies-dpi.sh /usr/local/libexec/patch-selkies-dpi.sh
 RUN UBUNTU_VERSION="${UBUNTU_VERSION}" \
     INSTALL_ROS2="${INSTALL_ROS2}" \
     INSTALL_DEV_TOOLS="${INSTALL_DEV_TOOLS}" \
     /usr/local/libexec/install-development.sh && \
-    rm -f /usr/local/libexec/install-development.sh
+    /usr/local/libexec/patch-selkies-dpi.sh && \
+    rm -f \
+      /usr/local/libexec/install-development.sh \
+      /usr/local/libexec/patch-selkies-dpi.sh
 
 COPY rootfs/customize-user.sh /usr/local/libexec/customize-apple-container-user.sh
 COPY assets/kubuntu-kdeglobals /tmp/kubuntu-kdeglobals

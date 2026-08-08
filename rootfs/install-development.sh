@@ -57,10 +57,7 @@ if [[ "${INSTALL_ROS2}" == "true" ]]; then
     python3-colcon-common-extensions python3-rosdep
   rosdep init 2>/dev/null || [[ -f /etc/ros/rosdep/sources.list.d/20-default.list ]]
   printf '%s\n' "${ros_distro}" > /etc/ros-distro
-  printf '%s\n' \
-    '# Source the ROS 2 environment when it is installed.' \
-    "if [ -f /opt/ros/${ros_distro}/setup.bash ]; then . /opt/ros/${ros_distro}/setup.bash; fi" \
-    > /etc/profile.d/ros2.sh
+  rm -f /etc/profile.d/ros2.sh
 fi
 
 install -o root -g xrdp -m 2775 -d /run/xrdp

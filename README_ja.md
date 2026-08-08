@@ -17,9 +17,9 @@ RDPクライアントとSelkies WebRTCによるブラウザのどちらからで
 - Ubuntu 22.04 + ROS 2 Humble Desktop Full、またはUbuntu 24.04 + ROS 2 Jazzy Desktop Full
 - `colcon`、`rosdep`、C/C++・Python開発環境、エディター、Git、SSHツール、LibreOffice
 - Selkiesブラウザ接続とXRDPの両方に対応したKDE Plasma
-- イメージ言語（`en`/`ja`）とキーボード（`us`/`jp`）の独立選択
+- 表示言語（`en`/`jp`）とキーボード（`us`/`jp`）の独立選択
 - 英語を既定とし、日本語選択時だけ日本語パッケージを追加
-- ビルド・起動時の対話設定と`configs/default.env`への保存
+- ビルド時と初回起動時の対話設定、および`configs/default.env`への保存
 - Tokyo固定ではなく、起動したMacからタイムゾーンを自動検出
 - `/config`の永続化と、macOSホーム・SSHディレクトリの任意マウント
 - KDEデスクトップのホーム・ごみ箱アイコン
@@ -54,7 +54,7 @@ cd /path/to/Development-Container-for-ROS2-on-Arm64-Mac
 # イメージ設定を対話選択してビルド
 ./build.sh
 
-# 実行設定を対話選択してコンテナを作成または起動
+# 保存済み設定で起動（初回のみ設定ウィザードを表示）
 ./start.sh
 ```
 
@@ -62,8 +62,9 @@ cd /path/to/Development-Container-for-ROS2-on-Arm64-Mac
 質問します。その後にデスクトップ用パスワードを入力しますが、パスワードは設定ファイルへ
 保存しません。
 
-起動ではポート、表示、タイムゾーン、実行用リソース、マウント、XRDPの有効・無効を質問します。
-両方の回答は`configs/default.env`へ保存します。自動処理で保存済み設定を再利用する場合は
+初回の起動ではポート、表示、タイムゾーン、実行用リソース、マウント、XRDPの有効・無効を質問します。
+回答は`configs/default.env`へ保存し、2回目以降は質問せず再利用します。設定ウィザードを再実行するには
+`./start.sh --reconfigure`を、自動処理で実行設定が未完了の場合に質問せず失敗させるには
 `--non-interactive`を指定します。
 
 ## デスクトップへの接続
@@ -92,17 +93,20 @@ WebとXRDPではmacOSのユーザー名と`./build.sh`で入力したパスワ�
 | 24.04 Noble（既定） | ROS 2 Jazzy | `ros-jazzy-desktop-full` |
 
 ROSを省く場合はビルド時に`INSTALL_ROS2=false`を選びます。有効時は`ros-dev-tools`、colcon、
-rosdepも導入し、`~/ros2_ws/src`を作成して、Bash起動時に対応するROS環境を読み込みます。
-ベースイメージのUbuntu版が選択と一致しない場合、ビルドは停止します。
+rosdepも導入します。コンテナの書き込みレイヤーにはworkspaceを自動作成しません。必要な場合は、
+削除後も残るホスト側storage（例：`~/host_home/ros2_ws`）に作成してください。ROS環境は自動では
+読み込みません。必要なshellで
+`source /opt/ros/<distro>/setup.bash`を実行してください。ベースイメージのUbuntu版が選択と
+一致しない場合、ビルドは停止します。
 
 ### 言語とキーボード
 
-既定のイメージ言語は英語です。言語とキーボードは独立した設定です。
+表示言語と物理キーボードはどちらも英語側が既定です。言語とキーボードは独立した設定です。
 
 - `USER_LANGUAGE=en`: 英語ロケール。日本語フォントや入力パッケージを追加しません。
-- `USER_LANGUAGE=ja`: 日本語ロケール、フォント、Fcitx、Mozcを追加します。
-- `KEYBOARD_LAYOUT=us`: US XKBキーボード。既定値です。
-- `KEYBOARD_LAYOUT=jp`: 日本語XKBキーボード。
+- `USER_LANGUAGE=jp`: 日本語ロケール、フォント、Fcitx、Mozcを追加します。
+- `KEYBOARD_LAYOUT=us`: USキーボード。既定値です。
+- `KEYBOARD_LAYOUT=jp`: 日本語JISキーボード。
 
 これらはイメージ設定です。変更後は再ビルドし、コンテナを再作成してください。
 
@@ -121,9 +125,10 @@ LibreOffice、`clinfo`などが対象です。小さいイメージが必要な�
 | `./configure.sh` | 保存設定を全て対話編集 |
 | `./build.sh` | 対話設定後にarm64イメージをビルド |
 | `./build.sh --non-interactive` | 保存済みイメージ設定でビルド |
-| `./start.sh` | 対話設定後にデスクトップを起動 |
+| `./start.sh` | 保存済み設定で起動し、初回のみ設定ウィザードを実行 |
+| `./start.sh --reconfigure` | 実行設定を対話編集してコンテナを再作成 |
 | `./start.sh --recreate` | コンテナを置き換えて現在の実行設定を再適用 |
-| `./start.sh --non-interactive` | 保存済み実行設定で起動 |
+| `./start.sh --non-interactive` | 保存済み設定で起動し、実行設定が未完了なら失敗 |
 | `./stop.sh` | コンテナを停止 |
 | `./restart.sh` | コンテナを再起動 |
 | `./shell.sh` | コンテナ内で対話Bashを開く |
@@ -135,6 +140,22 @@ LibreOffice、`clinfo`などが対象です。小さいイメージが必要な�
 
 BuildとStartは`--config path`にも対応するため、設定を分けた複数デスクトップを管理できます。
 
+自動生成するコンテナ名、イメージ名、volume名にはUbuntu版が入ります。例えば
+`development-container-for-ros2-on-arm64-mac-$USER-u22.04`と、対応する`-u24.04`名です。
+1つの設定ファイルを毎回書き換えず両方を管理するには、Ubuntu版ごとに設定を分けます。
+
+```bash
+./build.sh --config configs/22.04.env
+./start.sh --config configs/22.04.env
+
+./build.sh --config configs/24.04.env
+./start.sh --config configs/24.04.env
+```
+
+両方を同時起動する場合は、それぞれの設定で異なるhost portを指定してください。旧版で作成した
+設定ファイルの明示的な名前はそのまま維持します。その設定のUbuntu版をビルドウィザードで変更した
+場合は旧自動生成名を新しいUbuntu版へ更新しますが、以前のコンテナ、イメージ、volumeは削除しません。
+
 ## 設定が反映されるタイミング
 
 設定の適用時点を明確に二段階へ分けています。
@@ -144,10 +165,13 @@ BuildとStartは`--config path`にも対応するため、設定を分けた複�
 | イメージ | Ubuntu、ROS、言語、キーボード、ツール | `./build.sh`によるイメージ作成時 |
 | 実行 | ポート、解像度、タイムゾーン、CPU、メモリ、マウント | `./start.sh`によるコンテナ作成時 |
 
-既存コンテナは作成時の実行設定を保持します。対話式`start.sh`は保存設定の変更を検出して
-コンテナを再作成します。手動編集後は`./start.sh --recreate`を実行してください。再作成では
+既存コンテナは作成時の実行設定を保持します。実行設定を対話編集して反映するには
+`./start.sh --reconfigure`を使います。設定ファイルを手動編集した後は`./start.sh --recreate`を実行してください。再作成では
 named volumeを保持し、コンテナの書き込みレイヤーを破棄します。イメージ設定を変更した場合だけ
 再ビルドも必要です。
+
+デスクトップの文字・フォント描画では設定済みの`DPI`を常に使用します。Retinaブラウザからの
+device pixel ratioでは上書きされず、`STREAM_SCALE`は配信画面の寸法だけを変更します。
 
 タイムゾーンの既定値は設定初期化時にMacから検出し、取得できない場合だけ`UTC`を使います。
 
@@ -181,7 +205,7 @@ NO_CACHE=true ./build.sh
 Apple `container`の新規環境では`apple-container`ブランチのスクリプトを使ってください。
 旧DockerスクリプトとDockerfileはリポジトリの`22.04`・`24.04`ブランチから参照できます。
 ホスト文書は既定の`~/host_home`マウントで移動でき、ROS workspaceは導入済みのcolconと
-rosdepで再構築できます。
+rosdepで再構築できます。コンテナ削除後も残すworkspaceは`~/host_home`以下に作成してください。
 
 旧版のCommit・Flattenデスクトップ操作は現行版へ移していません。Apple `container`はゲストへ
 Docker socketを公開しないためです。恒久的なシステム変更は`Containerfile`または`rootfs/`へ
@@ -214,10 +238,11 @@ Docker socketを公開しないためです。恒久的なシステム変更は`
 
 ### 2. 設定の流れ
 
-`build.sh`は`configure.sh --build`、`start.sh`は`configure.sh --runtime`を呼びます。
-両方ともshell-safeな値を同じenvファイルへ書きます。ビルド設定はイメージ内のファイルと
+`build.sh`は`configure.sh --build`を呼びます。`start.sh`が`configure.sh --runtime`を呼ぶのは、
+設定ファイルがない初回または`--reconfigure`指定時だけです。どちらもshell-safeな値を同じ
+envファイルへ書きます。ビルド設定はイメージ内のファイルと
 パッケージになり、実行設定は`container run`引数になります。そのため作成済みコンテナへ
-実行設定を後付けできません。`start.sh`は設定checksumを比較して再作成の必要性を判定します。
+実行設定を後付けできません。`--reconfigure`では新しい実行設定を反映するためコンテナを再作成します。
 
 ### 3. イメージ構築
 
@@ -227,7 +252,7 @@ Desktop Full、rosdep、colcon、任意の開発アプリを導入します。Ub
 XRDP moduleも導入します。
 
 続いて`rootfs/customize-user.sh`がLinuxのユーザー名・UID・GIDをMac側へ合わせ、一時secretから
-Linux・Web認証を設定し、標準ディレクトリと`~/ros2_ws/src`を準備します。さらにlocale、XKB、
+Linux・Web認証を設定し、標準ディレクトリを準備します。さらにlocale、XKB、
 KDE既定値、ホーム・ごみ箱アイコンを設定します。日本語パッケージは日本語ビルド時だけ導入します。
 
 ### 4. VMとサービスの起動

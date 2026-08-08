@@ -40,20 +40,24 @@ require_apple_silicon_mac
 HOST_USER=$(id -un)
 HOST_UID=$(id -u)
 HOST_TIMEZONE=$(detect_host_timezone)
-default_name="development-container-for-ros2-on-arm64-mac-${HOST_USER}"
-default_image="development-container-for-ros2-on-arm64-mac-${HOST_USER}-u24.04:1.1.0"
-default_base_image="ghcr.io/tatsuyai713/webtop-kde-base-arm64-u24.04:1.1.0"
+name_prefix="development-container-for-ros2-on-arm64-mac-${HOST_USER}"
 
+CONFIG_FILE_EXISTED=false
 if [[ -f "${CONFIG_FILE}" ]]; then
+  CONFIG_FILE_EXISTED=true
   # shellcheck source=/dev/null
   source "${CONFIG_FILE}"
 fi
 
+UBUNTU_VERSION=${UBUNTU_VERSION:-24.04}
+default_name="${name_prefix}-u${UBUNTU_VERSION}"
+default_image="${default_name}:1.1.0"
+default_base_image="ghcr.io/tatsuyai713/webtop-kde-base-arm64-u${UBUNTU_VERSION}:1.1.0"
 CONTAINER_NAME=${CONTAINER_NAME:-${default_name}}
 IMAGE_NAME=${IMAGE_NAME:-${default_image}}
-UBUNTU_VERSION=${UBUNTU_VERSION:-24.04}
 BASE_IMAGE=${BASE_IMAGE:-${default_base_image}}
 USER_LANGUAGE=${USER_LANGUAGE:-en}
+[[ "${USER_LANGUAGE}" == "ja" ]] && USER_LANGUAGE=jp
 KEYBOARD_LAYOUT=${KEYBOARD_LAYOUT:-us}
 INSTALL_ROS2=${INSTALL_ROS2:-true}
 INSTALL_DEV_TOOLS=${INSTALL_DEV_TOOLS:-true}
@@ -77,6 +81,9 @@ SHM_SIZE=${SHM_SIZE:-4G}
 MOUNT_HOME=${MOUNT_HOME:-true}
 MOUNT_SSH=${MOUNT_SSH:-true}
 SSL_DIR=${SSL_DIR:-}
+# New build-only configurations still need the first-run startup wizard. Configuration files from
+# older project versions are treated as already configured for backward compatibility.
+RUNTIME_CONFIGURED=${RUNTIME_CONFIGURED:-${CONFIG_FILE_EXISTED}}
 
 prompt() {
   local variable=$1 label=$2 default_value=$3 answer
@@ -92,11 +99,21 @@ if [[ "${CONFIG_SCOPE}" == "all" || "${CONFIG_SCOPE}" == "build" ]]; then
   if [[ "${UBUNTU_VERSION}" != "${previous_ubuntu_version}" ]]; then
     IMAGE_NAME=${IMAGE_NAME/u${previous_ubuntu_version}/u${UBUNTU_VERSION}}
     BASE_IMAGE=${BASE_IMAGE/u${previous_ubuntu_version}/u${UBUNTU_VERSION}}
+    if [[ "${CONTAINER_NAME}" == "${name_prefix}" ]]; then
+      CONTAINER_NAME="${name_prefix}-u${UBUNTU_VERSION}"
+    else
+      CONTAINER_NAME=${CONTAINER_NAME/u${previous_ubuntu_version}/u${UBUNTU_VERSION}}
+    fi
+    if [[ "${CONFIG_VOLUME}" == "${name_prefix}-config" ]]; then
+      CONFIG_VOLUME="${name_prefix}-u${UBUNTU_VERSION}-config"
+    else
+      CONFIG_VOLUME=${CONFIG_VOLUME/u${previous_ubuntu_version}/u${UBUNTU_VERSION}}
+    fi
   fi
   prompt IMAGE_NAME "Image name" "${IMAGE_NAME}"
   prompt BASE_IMAGE "Base image" "${BASE_IMAGE}"
-  prompt USER_LANGUAGE "Image language (en/ja)" "${USER_LANGUAGE}"
-  prompt KEYBOARD_LAYOUT "Keyboard layout (us/jp)" "${KEYBOARD_LAYOUT}"
+  prompt USER_LANGUAGE "Desktop display language (en=English, jp=Japanese)" "${USER_LANGUAGE}"
+  prompt KEYBOARD_LAYOUT "Physical keyboard layout (us=US, jp=Japanese JIS)" "${KEYBOARD_LAYOUT}"
   prompt INSTALL_ROS2 "Install ROS 2 development environment (true/false)" "${INSTALL_ROS2}"
   prompt INSTALL_DEV_TOOLS "Install development tools (true/false)" "${INSTALL_DEV_TOOLS}"
   prompt BUILD_CPUS "Build virtual CPUs" "${BUILD_CPUS}"
@@ -122,15 +139,17 @@ if [[ "${CONFIG_SCOPE}" == "all" || "${CONFIG_SCOPE}" == "runtime" ]]; then
   prompt MOUNT_HOME "Mount macOS home (true/false)" "${MOUNT_HOME}"
   prompt MOUNT_SSH "Mount ~/.ssh (true/false)" "${MOUNT_SSH}"
   prompt SSL_DIR "SSL directory (blank for image defaults)" "${SSL_DIR}"
+  RUNTIME_CONFIGURED=true
 fi
 
 [[ "${RESOLUTION}" =~ ^[0-9]+x[0-9]+$ ]] || die "Resolution must look like 1920x1080."
 [[ "${UBUNTU_VERSION}" == "22.04" || "${UBUNTU_VERSION}" == "24.04" ]] || die "Ubuntu version must be 22.04 or 24.04."
-[[ "${USER_LANGUAGE}" == "en" || "${USER_LANGUAGE}" == "ja" ]] || die "Image language must be en or ja."
+[[ "${USER_LANGUAGE}" == "en" || "${USER_LANGUAGE}" == "jp" ]] || die "Image language must be en or jp."
 [[ "${KEYBOARD_LAYOUT}" == "us" || "${KEYBOARD_LAYOUT}" == "jp" ]] || die "Keyboard layout must be us or jp."
 [[ "${INSTALL_ROS2}" == "true" || "${INSTALL_ROS2}" == "false" ]] || die "INSTALL_ROS2 must be true or false."
 [[ "${INSTALL_DEV_TOOLS}" == "true" || "${INSTALL_DEV_TOOLS}" == "false" ]] || die "INSTALL_DEV_TOOLS must be true or false."
 [[ "${ENABLE_XRDP}" == "true" || "${ENABLE_XRDP}" == "false" ]] || die "ENABLE_XRDP must be true or false."
+[[ "${RUNTIME_CONFIGURED}" == "true" || "${RUNTIME_CONFIGURED}" == "false" ]] || die "RUNTIME_CONFIGURED must be true or false."
 [[ "${DPI}" =~ ^[0-9]+$ ]] || die "DPI must be a positive integer."
 for port in "${HTTP_PORT}" "${HTTPS_PORT}" "${RDP_PORT}" "${FOXGLOVE_PORT}" "${ROSBRIDGE_PORT}"; do
   [[ "${port}" =~ ^[0-9]+$ ]] && (( 10#${port} >= 1 && 10#${port} <= 65535 )) || die "Ports must be integers from 1 to 65535."
@@ -172,6 +191,7 @@ write_setting() {
   write_setting MOUNT_HOME "${MOUNT_HOME}"
   write_setting MOUNT_SSH "${MOUNT_SSH}"
   write_setting SSL_DIR "${SSL_DIR}"
+  write_setting RUNTIME_CONFIGURED "${RUNTIME_CONFIGURED}"
 } > "${CONFIG_FILE}"
 
 echo "Container configuration saved: ${CONFIG_FILE}"

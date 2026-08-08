@@ -6,13 +6,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 RECREATE=false
-INTERACTIVE=true
+RECONFIGURE=false
+NON_INTERACTIVE=false
 CONFIG_FILE=${CONFIG_FILE:-${CONFIG_FILE_DEFAULT}}
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --recreate) RECREATE=true; shift ;;
-    --reconfigure) RECREATE=true; shift ;;
-    --non-interactive) INTERACTIVE=false; shift ;;
+    --reconfigure) RECONFIGURE=true; RECREATE=true; shift ;;
+    --non-interactive) NON_INTERACTIVE=true; shift ;;
     --config)
       [[ $# -ge 2 ]] || die "--config requires a path."
       CONFIG_FILE=$2
@@ -20,12 +21,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<EOF
-Usage: $0 [--recreate] [--config path] [--non-interactive]
+Usage: $0 [--recreate | --reconfigure] [--config path] [--non-interactive]
 
   --recreate     Recreate the container from the saved configuration
-  --reconfigure  Alias for interactive configuration plus --recreate
+  --reconfigure  Interactively update runtime settings, then recreate the container
   --config path  Use a different configuration file
-  --non-interactive  Start using the saved configuration without prompts
+  --non-interactive  Never prompt; fail if runtime configuration is incomplete
 EOF
       exit 0
       ;;
@@ -33,20 +34,39 @@ EOF
   esac
 done
 
+if [[ "${RECONFIGURE}" == "true" && "${NON_INTERACTIVE}" == "true" ]]; then
+  die "--reconfigure and --non-interactive cannot be used together."
+fi
+
 require_apple_silicon_mac
 require_container_cli
 require_container_system
-if [[ "${INTERACTIVE}" == "true" ]]; then
-  previous_config_checksum=
-  if [[ -f "${CONFIG_FILE}" ]]; then
-    previous_config_checksum=$(cksum < "${CONFIG_FILE}")
+
+RUNTIME_SETUP_REQUIRED=false
+if [[ ! -f "${CONFIG_FILE}" ]]; then
+  RUNTIME_SETUP_REQUIRED=true
+elif ! (
+  # Older configuration files have already passed through the runtime wizard.
+  RUNTIME_CONFIGURED=true
+  # shellcheck source=/dev/null
+  source "${CONFIG_FILE}"
+  [[ "${RUNTIME_CONFIGURED}" == "true" ]]
+); then
+  RUNTIME_SETUP_REQUIRED=true
+fi
+
+if [[ "${RECONFIGURE}" == "true" || "${RUNTIME_SETUP_REQUIRED}" == "true" ]]; then
+  if [[ "${NON_INTERACTIVE}" == "true" ]]; then
+    die "Runtime configuration is incomplete: ${CONFIG_FILE}. Run ./configure.sh --runtime --config ${CONFIG_FILE} first."
+  fi
+  [[ -t 0 ]] || die "Interactive configuration requires a terminal. Run ./configure.sh --runtime --config ${CONFIG_FILE} first."
+  if [[ ! -f "${CONFIG_FILE}" ]]; then
+    echo "No saved configuration found; starting the first-run setup."
+  elif [[ "${RUNTIME_SETUP_REQUIRED}" == "true" ]]; then
+    echo "Runtime settings have not been configured; starting the first-run setup."
   fi
   "${SCRIPT_DIR}/configure.sh" --runtime --config "${CONFIG_FILE}"
-  current_config_checksum=$(cksum < "${CONFIG_FILE}")
-  if [[ -n "${previous_config_checksum}" && "${current_config_checksum}" != "${previous_config_checksum}" ]]; then
-    echo "Runtime configuration changed; the container will be recreated to apply it."
-    RECREATE=true
-  fi
+  RECREATE=true
 else
   ensure_config "${CONFIG_FILE}"
 fi

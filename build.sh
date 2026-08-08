@@ -39,7 +39,7 @@ HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 
 case "${USER_LANGUAGE}" in
-  ja)
+  jp)
     USER_LANG_ENV=ja_JP.UTF-8
     USER_LANGUAGE_ENV=ja_JP:ja
     USER_INPUT_METHOD=fcitx

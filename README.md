@@ -18,9 +18,9 @@ branches. The `apple-container` branch contains this current implementation.
 - Ubuntu 22.04 with ROS 2 Humble Desktop Full, or Ubuntu 24.04 with ROS 2 Jazzy Desktop Full
 - `colcon`, `rosdep`, C/C++ and Python development tools, editors, Git, SSH tools, and LibreOffice
 - KDE Plasma access through both Selkies in a browser and XRDP
-- Independent image-language (`en`/`ja`) and keyboard-layout (`us`/`jp`) choices
+- Independent display-language (`en`/`jp`) and keyboard-layout (`us`/`jp`) choices
 - English-only packages by default, avoiding Japanese packages unless Japanese is selected
-- Interactive build and start commands with reusable settings in `configs/default.env`
+- Interactive build setup and first-run start setup with reusable settings in `configs/default.env`
 - Host time-zone detection at start time instead of a fixed Tokyo default
 - Persistent `/config` storage and optional macOS home and SSH-directory mounts
 - Home and Trash icons on the KDE desktop
@@ -55,7 +55,7 @@ cd /path/to/Development-Container-for-ROS2-on-Arm64-Mac
 # Interactively select image settings, then build
 ./build.sh
 
-# Interactively select runtime settings, then create or start the container
+# Start with saved settings (the first run opens the setup wizard)
 ./start.sh
 ```
 
@@ -63,9 +63,10 @@ The build asks for the Ubuntu release, image name, language, keyboard, ROS insta
 development tools, and build resources. It then asks for the desktop password without saving
 that password in the configuration file.
 
-The start command asks for ports, display settings, time zone, runtime resources, mounts, and
-whether XRDP is enabled. Answers from both commands are saved to `configs/default.env`.
-Use `--non-interactive` to reuse saved answers in automation.
+On the first run, the start command asks for ports, display settings, time zone, runtime resources,
+mounts, and whether XRDP is enabled. Answers are saved to `configs/default.env`; later runs reuse
+them without prompts. Use `./start.sh --reconfigure` to run the wizard again, or
+`--non-interactive` in automation to fail instead of prompting when runtime setup is incomplete.
 
 ## Connecting to the Desktop
 
@@ -93,18 +94,21 @@ of the same display. The ports bind to `127.0.0.1` by default and are not expose
 | 24.04 Noble (default) | ROS 2 Jazzy | `ros-jazzy-desktop-full` |
 
 Set `INSTALL_ROS2=false` during the build to omit ROS packages. When enabled, the image also
-installs `ros-dev-tools`, colcon, and rosdep, creates `~/ros2_ws/src`, and automatically sources
-the selected ROS environment in Bash. The selected base image must match the Ubuntu version;
+installs `ros-dev-tools`, colcon, and rosdep. It does not create a workspace in the container's
+writable home layer. Create one in persistent host storage, for example `~/host_home/ros2_ws`, if
+needed. ROS is not sourced automatically. Enable it only in a shell that needs it with
+`source /opt/ros/<distro>/setup.bash`. The selected base image must match the Ubuntu version;
 the build stops on a mismatch.
 
 ### Language and keyboard
 
-English is the default image language. The two settings are independent:
+English is the default for both the display language and physical keyboard. The two settings are
+independent:
 
 - `USER_LANGUAGE=en` uses an English locale and does not add Japanese fonts or input packages.
-- `USER_LANGUAGE=ja` adds the Japanese locale, fonts, Fcitx, and Mozc.
-- `KEYBOARD_LAYOUT=us` selects a US XKB keyboard and is the default.
-- `KEYBOARD_LAYOUT=jp` selects a Japanese XKB keyboard.
+- `USER_LANGUAGE=jp` adds the Japanese locale, fonts, Fcitx, and Mozc.
+- `KEYBOARD_LAYOUT=us` selects a US keyboard and is the default.
+- `KEYBOARD_LAYOUT=jp` selects a Japanese JIS keyboard.
 
 These are image settings. Rebuild the image after changing them, then recreate the container.
 
@@ -123,9 +127,10 @@ archive commands, LibreOffice, and `clinfo`. Turn it off when a smaller image is
 | `./configure.sh` | Interactively edit all saved settings |
 | `./build.sh` | Interactively configure and build the arm64 image |
 | `./build.sh --non-interactive` | Build with saved image settings |
-| `./start.sh` | Interactively configure and start the desktop |
+| `./start.sh` | Start with saved settings; run the wizard only on the first run |
+| `./start.sh --reconfigure` | Interactively update runtime settings and recreate the container |
 | `./start.sh --recreate` | Replace the container and reapply current runtime settings |
-| `./start.sh --non-interactive` | Start with saved runtime settings |
+| `./start.sh --non-interactive` | Start with saved settings, or fail if runtime setup is incomplete |
 | `./stop.sh` | Stop the container |
 | `./restart.sh` | Restart the container |
 | `./shell.sh` | Open an interactive Bash shell in the container |
@@ -138,6 +143,24 @@ archive commands, LibreOffice, and `clinfo`. Turn it off when a smaller image is
 Every command accepts the current project defaults. Build and start also accept
 `--config path`; this allows multiple independently configured desktops.
 
+The generated container, image, and volume names include the Ubuntu release, for example
+`development-container-for-ros2-on-arm64-mac-$USER-u22.04` and the corresponding `-u24.04`
+name. To manage both releases without repeatedly changing one file, give each release its own
+configuration:
+
+```bash
+./build.sh --config configs/22.04.env
+./start.sh --config configs/22.04.env
+
+./build.sh --config configs/24.04.env
+./start.sh --config configs/24.04.env
+```
+
+Choose different host ports in the two configurations if both containers must run at the same
+time. Configuration files created by an older version keep their explicit names; changing their
+Ubuntu version in the build wizard updates the former generated names without deleting the old
+container, image, or volume.
+
 ## When Configuration Takes Effect
 
 The configuration is explicit and divided into two phases:
@@ -147,10 +170,14 @@ The configuration is explicit and divided into two phases:
 | Image | Ubuntu, ROS, language, keyboard, tools | `./build.sh` creates an image |
 | Runtime | ports, resolution, time zone, CPU, memory, mounts | `./start.sh` creates a container |
 
-An existing container keeps the runtime options used at its creation. Interactive `start.sh`
-detects changed saved settings and recreates the container. After manual edits, run
-`./start.sh --recreate`. Recreation keeps the named volume but discards the container's writable
+An existing container keeps the runtime options used at its creation. Use
+`./start.sh --reconfigure` to edit runtime settings interactively and recreate the container. After
+manual edits, run `./start.sh --recreate`. Recreation keeps the named volume but discards the container's writable
 layer. A rebuild is required only for image-setting changes.
+
+The configured `DPI` is authoritative for desktop text and font rendering. Retina browser
+device-pixel-ratio reports cannot override it; `STREAM_SCALE` changes only the streamed display
+dimensions.
 
 The default time zone is detected from the Mac each time configuration is initialized. `UTC` is
 used only if the host setting cannot be determined.
@@ -185,7 +212,8 @@ It keeps both image and volume by default. `--volume` also removes persistent de
 Use the scripts in the `apple-container` branch for all new Apple `container` installations.
 The previous Docker scripts and Dockerfiles remain available in the repository's `22.04` and
 `24.04` branches. Host documents can be moved through the default `~/host_home` mount, while
-ROS workspaces can be rebuilt with the installed colcon and rosdep tools.
+ROS workspaces can be rebuilt with the installed colcon and rosdep tools. Put new workspaces under
+the host-backed `~/host_home` mount if they must survive container deletion.
 
 The former Commit and Flatten desktop actions are not carried into the active implementation.
 Apple `container` does not provide the guest with a Docker socket. Permanent system changes now
@@ -222,11 +250,12 @@ the Debian architecture again before continuing.
 
 ### 2. Configuration flow
 
-`build.sh` invokes `configure.sh --build`, while `start.sh` invokes
-`configure.sh --runtime`. Both write shell-safe values to the same env file. Build choices become
+`build.sh` invokes `configure.sh --build`. `start.sh` invokes `configure.sh --runtime` only when the
+configuration is missing or `--reconfigure` is specified. Both write shell-safe values to the same
+env file. Build choices become
 files and packages in an image. Runtime choices become `container run` arguments and therefore
-cannot be added to an already-created container. `start.sh` compares configuration checksums to
-decide whether recreation is necessary.
+cannot be added to an already-created container. `--reconfigure` recreates the container so the
+new runtime settings take effect.
 
 ### 3. Image construction
 
@@ -236,8 +265,8 @@ appropriate ROS apt source, the selected Desktop Full package, rosdep, colcon, a
 development applications. On Ubuntu 24.04 it also installs the PipeWire XRDP module.
 
 Next, `rootfs/customize-user.sh` aligns the Linux username, UID, and GID with the Mac account,
-sets the Linux and web credentials from the temporary secret, prepares standard directories and
-`~/ros2_ws/src`, configures locale and XKB, applies KDE defaults, and creates Home and Trash
+sets the Linux and web credentials from the temporary secret, prepares standard directories,
+configures locale and XKB, applies KDE defaults, and creates Home and Trash
 desktop icons. Japanese packages are installed only for a Japanese-language build.
 
 ### 4. VM and service startup
