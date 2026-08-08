@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+if [[ "${ENABLE_XRDP:-true}" != "true" ]]; then
+  exec sleep infinity
+fi
+
+exec /usr/sbin/xrdp-sesman --nodaemon
+

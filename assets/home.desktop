@@ -1,0 +1,10 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=Home
+Name[ja]=ホーム
+GenericName=Personal Files
+GenericName[ja]=個人用ファイル
+URL[$e]=$HOME
+Icon=user-home
+Type=Link
+

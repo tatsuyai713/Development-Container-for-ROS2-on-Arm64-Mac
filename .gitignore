@@ -1,0 +1,6 @@
+configs/*.env
+!configs/example.env
+ssl/*.pem
+ssl/*.key
+.DS_Store
+*.log

@@ -1,0 +1,25 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+[[ "${ENABLE_XRDP:-true}" == "true" ]] || exit 0
+
+target_user=${USER_NAME:?}
+target_home=$(getent passwd "${target_user}" | cut -d: -f6)
+target_group=$(id -gn "${target_user}")
+
+install -o root -g xrdp -m 2775 -d /run/xrdp
+install -o root -g xrdp -m 3777 -d /run/xrdp/sockdir
+install -o root -g root -m 0755 -d /run/dbus
+
+if [[ ! -s /etc/xrdp/rsakeys.ini ]]; then
+  xrdp-keygen xrdp /etc/xrdp/rsakeys.ini >/dev/null 2>&1
+  chown xrdp:xrdp /etc/xrdp/rsakeys.ini
+  chmod 600 /etc/xrdp/rsakeys.ini
+fi
+
+if [[ ! -s "${target_home}/.xsession" ]]; then
+  cp /usr/local/share/xrdp-session.sh "${target_home}/.xsession"
+fi
+chmod 755 "${target_home}/.xsession"
+chown "${target_user}:${target_group}" "${target_home}/.xsession"
+

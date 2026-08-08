@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Trash
+Name[ja]=ごみ箱
+Comment=Contains removed files
+Comment[ja]=削除したファイルを格納します
+Icon=user-trash-full
+EmptyIcon=user-trash
+URL=trash:/
+Type=Link
+
