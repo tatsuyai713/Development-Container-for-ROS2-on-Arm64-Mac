@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Save Container Image
+Exec=/usr/local/bin/project-container-action save
+Icon=document-save
+Terminal=false

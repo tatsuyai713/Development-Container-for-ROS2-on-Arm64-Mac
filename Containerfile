@@ -36,18 +36,31 @@ ENV HOME="/home/${USER_NAME}" \
     GLFW_IM_MODULE="${USER_INPUT_METHOD}"
 
 COPY rootfs/install-development.sh /usr/local/libexec/install-development.sh
+COPY assets/project-x11-session.sh /usr/local/share/project-x11-session.sh
+COPY rootfs/install-chrome.sh /usr/local/libexec/install-chrome.sh
 COPY rootfs/patch-selkies-dpi.sh /usr/local/libexec/patch-selkies-dpi.sh
 COPY rootfs/patch-selkies-audio.py /usr/local/libexec/patch-selkies-audio.py
+COPY rootfs/patch-selkies-plasma.py /usr/local/libexec/patch-selkies-plasma.py
+COPY rootfs/patch-selkies-client.py /usr/local/libexec/patch-selkies-client.py
+COPY assets/selkies-hardware-decoder.js assets/selkies-safari-clipboard.js /usr/local/share/project-selkies/
 RUN UBUNTU_VERSION="${UBUNTU_VERSION}" \
     INSTALL_ROS2="${INSTALL_ROS2}" \
     INSTALL_DEV_TOOLS="${INSTALL_DEV_TOOLS}" \
     /usr/local/libexec/install-development.sh && \
     /usr/local/libexec/patch-selkies-dpi.sh && \
     python3 /usr/local/libexec/patch-selkies-audio.py && \
+    python3 /usr/local/libexec/patch-selkies-plasma.py && \
+    python3 /usr/local/libexec/patch-selkies-client.py && \
     rm -f \
       /usr/local/libexec/install-development.sh \
+      /usr/local/libexec/install-chrome.sh \
       /usr/local/libexec/patch-selkies-dpi.sh \
+      /usr/local/libexec/patch-selkies-plasma.py \
       /usr/local/libexec/patch-selkies-audio.py
+
+# init-nginx refreshes the served dashboard and runs upstream compatibility
+# hooks. Apply our shared client fixes after those hooks on every startup.
+RUN printf '\npython3 /usr/local/libexec/patch-selkies-client.py\n' >> /etc/s6-overlay/s6-rc.d/init-nginx/run
 
 COPY --from=xrdp-pulseaudio-builder /xrdp-pulseaudio-root/ /
 
@@ -58,6 +71,8 @@ COPY assets/trash.desktop /tmp/trash.desktop
 COPY assets/xrdp-session.sh /usr/local/share/xrdp-session.sh
 COPY rootfs/custom-cont-init.d/50-xrdp /custom-cont-init.d/50-xrdp
 COPY rootfs/s6-overlay/ /etc/s6-overlay/
+COPY assets/container-action.py /usr/local/bin/project-container-action
+COPY assets/container-*.desktop /usr/local/share/project-container-actions/
 
 RUN --mount=type=secret,id=user_password,required=true \
     USER_NAME="${USER_NAME}" \
@@ -70,10 +85,15 @@ RUN --mount=type=secret,id=user_password,required=true \
     rm -f /usr/local/libexec/customize-apple-container-user.sh
 
 RUN chmod 755 \
+    /usr/local/bin/project-container-action \
     /usr/local/share/xrdp-session.sh \
     /custom-cont-init.d/50-xrdp \
     /etc/s6-overlay/s6-rc.d/svc-xrdp-sesman/run \
     /etc/s6-overlay/s6-rc.d/svc-xrdp/run
+
+# Avoid the distro Xsession -> im-launch path: im-config 0.62 assumes a
+# systemd journal, which is not available in this s6-managed container.
+RUN install -m 755 /usr/local/share/xrdp-session.sh /etc/xrdp/startwm.sh
 
 EXPOSE 3000 3001 3389 8765 9090
 VOLUME ["/config"]

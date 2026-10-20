@@ -4,3 +4,6 @@ ssl/*.pem
 ssl/*.key
 .DS_Store
 *.log
+__pycache__/
+
+/configs/.last-used-config*

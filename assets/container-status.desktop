@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Container Status
+Exec=/usr/local/bin/project-container-action status
+Icon=view-list-details
+Terminal=false

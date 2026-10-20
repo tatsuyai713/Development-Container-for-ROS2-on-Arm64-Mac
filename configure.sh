@@ -109,8 +109,8 @@ prompt() {
 echo "Container configuration (${CONFIG_SCOPE})"
 if [[ "${CONFIG_SCOPE}" == "all" || "${CONFIG_SCOPE}" == "build" ]]; then
   previous_ubuntu_version=${saved_ubuntu_version}
-  prompt UBUNTU_VERSION "Ubuntu version (22.04/24.04)" "${UBUNTU_VERSION}"
-  [[ "${UBUNTU_VERSION}" == "22.04" || "${UBUNTU_VERSION}" == "24.04" ]] || die "Ubuntu version must be 22.04 or 24.04."
+  prompt UBUNTU_VERSION "Ubuntu version (22.04/24.04/26.04)" "${UBUNTU_VERSION}"
+  [[ "${UBUNTU_VERSION}" == "22.04" || "${UBUNTU_VERSION}" == "24.04" || "${UBUNTU_VERSION}" == "26.04" ]] || die "Ubuntu version must be 22.04, 24.04, or 26.04."
   if [[ "${RESET_BUILD_DEFAULTS}" == "true" ]]; then
     IMAGE_NAME="${name_prefix}-u${UBUNTU_VERSION}:1.1.0"
     BASE_IMAGE="ghcr.io/tatsuyai713/webtop-kde-base-arm64-u${UBUNTU_VERSION}:1.1.0"
@@ -164,7 +164,7 @@ if [[ "${CONFIG_SCOPE}" == "all" || "${CONFIG_SCOPE}" == "runtime" ]]; then
 fi
 
 [[ "${RESOLUTION}" =~ ^[0-9]+x[0-9]+$ ]] || die "Resolution must look like 1920x1080."
-[[ "${UBUNTU_VERSION}" == "22.04" || "${UBUNTU_VERSION}" == "24.04" ]] || die "Ubuntu version must be 22.04 or 24.04."
+[[ "${UBUNTU_VERSION}" == "22.04" || "${UBUNTU_VERSION}" == "24.04" || "${UBUNTU_VERSION}" == "26.04" ]] || die "Ubuntu version must be 22.04, 24.04, or 26.04."
 [[ "${USER_LANGUAGE}" == "en" || "${USER_LANGUAGE}" == "jp" ]] || die "Image language must be en or jp."
 [[ "${KEYBOARD_LAYOUT}" == "us" || "${KEYBOARD_LAYOUT}" == "jp" ]] || die "Keyboard layout must be us or jp."
 [[ "${INSTALL_ROS2}" == "true" || "${INSTALL_ROS2}" == "false" ]] || die "INSTALL_ROS2 must be true or false."

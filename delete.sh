@@ -5,42 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-CONFIG_FILE=${CONFIG_FILE:-${CONFIG_FILE_DEFAULT}}
-DELETE_VOLUME=false
-ASSUME_YES=false
-
-usage() {
-  cat <<EOF
-Usage: $0 [--volume] [--yes] [--config path]
-
-Delete the configured container. The image and named volume are kept by default.
-
-Options:
-  --volume       Also delete the configured /config named volume
-  --yes          Skip the confirmation prompt
-  --config path  Use a different configuration file
-  -h, --help     Show this help
-EOF
-}
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --volume) DELETE_VOLUME=true; shift ;;
-    --yes) ASSUME_YES=true; shift ;;
-    --config)
-      [[ $# -ge 2 ]] || die "--config requires a path."
-      CONFIG_FILE=$2
-      shift 2
-      ;;
-    -h|--help) usage; exit 0 ;;
-    *) die "Unknown option: $1" ;;
-  esac
-done
-
-require_apple_silicon_mac
-require_container_cli
-require_container_system
-load_config "${CONFIG_FILE}"
+runtime_options delete "$@"
+load_runtime_config
 
 container_found=false
 volume_found=false
@@ -65,7 +31,9 @@ if [[ "${ASSUME_YES}" != "true" ]]; then
 fi
 
 if [[ "${container_found}" == "true" ]]; then
-  container stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  if container_is_running "${CONTAINER_NAME}"; then
+    container stop "${CONTAINER_NAME}"
+  fi
   container delete "${CONTAINER_NAME}"
   echo "Deleted container: ${CONTAINER_NAME}"
 fi

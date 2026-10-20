@@ -23,6 +23,11 @@ case "${UBUNTU_VERSION}" in
     ros_distro=jazzy
     ros_desktop_package=ros-jazzy-desktop-full
     ;;
+  26.04)
+    ubuntu_codename=resolute
+    ros_distro=lyrical
+    ros_desktop_package=ros-lyrical-desktop-full
+    ;;
   *) echo "Unsupported Ubuntu version: ${UBUNTU_VERSION}" >&2; exit 1 ;;
 esac
 
@@ -32,9 +37,16 @@ apt-get install --no-install-recommends -y \
   ca-certificates curl dbus-x11 locales openssh-server software-properties-common \
   ssl-cert xorgxrdp xrdp
 
-if [[ "${UBUNTU_VERSION}" == "24.04" ]]; then
-  apt-get install --no-install-recommends -y pipewire-module-xrdp
+if [[ "${UBUNTU_VERSION}" == "26.04" ]]; then
+  apt-get install --no-install-recommends -y plasma-session-x11 pipewire-module-xrdp
+  # The Apple container desktop uses X11 software rendering, including XRDP.
+  install -m 755 /usr/local/share/project-x11-session.sh /defaults/startwm.sh
 fi
+# The session launcher loads audio modules and preserves the browser sink.
+# Disable generic autostart, which changes the shared server's default sink.
+rm -f /etc/xdg/autostart/pipewire-xrdp.desktop
+
+/usr/local/libexec/install-chrome.sh
 
 if [[ "${UBUNTU_VERSION}" == "22.04" ]]; then
   # Match the explicit Jammy wheel strategy used by kde-selkies-webtop-devcontainer. Newer
@@ -52,15 +64,18 @@ if [[ "${UBUNTU_VERSION}" == "22.04" ]]; then
 fi
 
 if [[ "${INSTALL_DEV_TOOLS}" == "true" ]]; then
+  archive_package=p7zip-full
+  [[ "${UBUNTU_VERSION}" == "26.04" ]] && archive_package=7zip
   apt-get install --no-install-recommends -y \
     apt-utils bash-completion build-essential clinfo cmake command-not-found emacs \
     g++ git gnupg htop iputils-ping jq less libreoffice libreoffice-style-breeze \
     lsb-release net-tools python3-numpy python3-pip python3-venv rsync \
-    p7zip-full telnet tmux unzip vim wget zip
+    "${archive_package}" telnet tmux unzip vim wget zip
 fi
 
 if [[ "${INSTALL_ROS2}" == "true" ]]; then
   ros_apt_source_version=1.1.0
+  [[ "${UBUNTU_VERSION}" == "26.04" ]] && ros_apt_source_version=1.3.0
   ros_apt_source=/tmp/ros2-apt-source.deb
   curl -fL --retry 3 \
     -o "${ros_apt_source}" \

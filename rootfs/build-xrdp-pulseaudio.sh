@@ -6,13 +6,24 @@ set -euo pipefail
 output_dir=${XRDP_PULSEAUDIO_OUTPUT_DIR:-/xrdp-pulseaudio-root}
 install -d "${output_dir}"
 
-# Ubuntu 24.04 uses pipewire-module-xrdp from the Ubuntu repository.
-[[ "${UBUNTU_VERSION}" == "22.04" ]] || exit 0
+# Ubuntu 26.04 uses the packaged PipeWire XRDP module instead.
+[[ "${UBUNTU_VERSION}" == "26.04" ]] && exit 0
+
+# Older base images run PulseAudio for Selkies. Match its internal module API.
+case "${UBUNTU_VERSION}" in
+  22.04) pulseaudio_tag=v15.99.1 ;;
+  24.04) pulseaudio_tag=v16.1 ;;
+  *) echo "Unsupported Ubuntu version: ${UBUNTU_VERSION}" >&2; exit 1 ;;
+esac
+installed_pulse_version=$(pulseaudio --version | awk '{print $2}')
+[[ "${installed_pulse_version}" == "${pulseaudio_tag#v}" ]] || {
+  echo "PulseAudio ${installed_pulse_version} does not match module sources ${pulseaudio_tag}." >&2
+  exit 1
+}
 
 # Keep the implementation used by the original 22.04 branch, but build it in
 # a throw-away image stage so compiler and development packages do not remain
 # in the final image.
-pulseaudio_tag=v15.99.1
 xrdp_audio_tag=v0.8
 work_dir=$(mktemp -d)
 trap 'rm -rf "${work_dir}"' EXIT

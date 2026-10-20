@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Stop Container
+Exec=/usr/local/bin/project-container-action stop
+Icon=system-shutdown
+Terminal=false

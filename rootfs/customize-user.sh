@@ -70,16 +70,25 @@ done
 
 if [[ "${USER_LANGUAGE:-en}" == "jp" ]]; then
   apt-get update
+  input_method=fcitx
+  input_packages=(fcitx fcitx-mozc fcitx-config-gtk fcitx-frontend-gtk3
+    fcitx-frontend-qt5 fcitx-module-dbus fcitx-module-kimpanel
+    fcitx-module-x11 fcitx-ui-classic kde-config-fcitx)
+  if [[ "$(. /etc/os-release && printf '%s' "${VERSION_ID}")" == "26.04" ]]; then
+    input_method=fcitx5
+    input_packages=(fcitx5 fcitx5-mozc fcitx5-config-qt fcitx5-frontend-gtk3
+      fcitx5-frontend-qt5 fcitx5-frontend-qt6 kde-config-fcitx5)
+  fi
   DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     language-pack-ja-base language-pack-ja im-config fonts-noto-cjk \
-    fonts-noto-color-emoji fcitx fcitx-mozc fcitx-config-gtk \
-    fcitx-frontend-gtk3 fcitx-frontend-qt5 fcitx-module-dbus \
-    fcitx-module-kimpanel fcitx-module-x11 fcitx-ui-classic kde-config-fcitx
+    fonts-noto-color-emoji "${input_packages[@]}"
   locale-gen ja_JP.UTF-8
   update-locale LANG=ja_JP.UTF-8 LANGUAGE=ja_JP:ja LC_ALL=ja_JP.UTF-8
-  im-config -n fcitx
+  # Configure the desktop user directly. im-config's logging requires a
+  # systemd journal on newer Ubuntu releases, which is absent during builds.
+  printf 'run_im %s\n' "${input_method}" > "/home/${USER_NAME}/.xinputrc"
   printf '%s\n' \
-    '[Desktop Entry]' 'Type=Application' 'Exec=fcitx -d' 'Hidden=false' \
+    '[Desktop Entry]' 'Type=Application' "Exec=${input_method} -d" 'Hidden=false' \
     'X-GNOME-Autostart-enabled=true' 'Name=fcitx' \
     > "/home/${USER_NAME}/.config/autostart/fcitx-autostart.desktop"
 fi
@@ -110,6 +119,8 @@ printf '%s\n' \
 
 cp /tmp/home.desktop "/home/${USER_NAME}/Desktop/home.desktop"
 cp /tmp/trash.desktop "/home/${USER_NAME}/Desktop/trash.desktop"
+cp /usr/local/share/project-container-actions/*.desktop "/home/${USER_NAME}/Desktop/"
+chmod 755 "/home/${USER_NAME}/Desktop/"container-*.desktop
 cp /usr/local/share/xrdp-session.sh "/home/${USER_NAME}/.xsession"
 cp /etc/skel/.bashrc "/home/${USER_NAME}/.bashrc" 2>/dev/null || true
 chmod 755 \
@@ -117,8 +128,11 @@ chmod 755 \
   "/home/${USER_NAME}/Desktop/trash.desktop" \
   "/home/${USER_NAME}/.xsession"
 
+# Package installation may create files under HOME as root. The desktop user
+# needs ownership before rosdep creates its cache, not only at the end.
+chown -R "${USER_UID}:${USER_GID}" "/home/${USER_NAME}"
 if [[ -s /etc/ros-distro ]]; then
-  su -s /bin/bash - "${USER_NAME}" -c 'rosdep update'
+  runuser -u "${USER_NAME}" -- env HOME="/home/${USER_NAME}" rosdep update
 fi
 
 sed -i 's/^%sudo.*NOPASSWD: ALL/%sudo ALL=(ALL:ALL) ALL/' /etc/sudoers || true

@@ -5,8 +5,9 @@ from pathlib import Path
 import re
 
 
-ASSET_DIR = Path("/usr/share/selkies/web/assets")
+ASSET_ROOT = Path("/usr/share/selkies")
 MARKER = "__selkiesAudioResumeInstalled"
+AUDIO_INIT = "Playback AudioWorkletProcessor initialized and connected through a GainNode for volume control."
 PATTERN = re.compile(
     r'(?P<gain>[A-Za-z_$][\w$]*)\.connect\('
     r'(?P<context>[A-Za-z_$][\w$]*)\.destination\),'
@@ -43,13 +44,25 @@ def patch_asset(path: Path) -> bool:
     return True
 
 
-assets = sorted(ASSET_DIR.glob("index-*.js"))
-if not assets:
-    raise SystemExit(f"No Selkies JavaScript bundle found under {ASSET_DIR}")
+def main(asset_root: Path = ASSET_ROOT) -> None:
+    # Older images use web/assets/index-*.js. Newer dashboards ship both
+    # assets/selkies-core-*.js and src/selkies-core.js, so inspect all bundles
+    # and select by playback code rather than a particular build filename.
+    assets = []
+    for path in sorted(asset_root.rglob("*.js")):
+        source = path.read_text(encoding="utf-8")
+        if AUDIO_INIT in source or MARKER in source:
+            if MARKER not in source and not PATTERN.search(source):
+                raise SystemExit(f"Unsupported Selkies audio initialization in {path}")
+            assets.append(path)
+    if not assets:
+        raise SystemExit(f"No Selkies playback JavaScript bundle found under {asset_root}")
 
-patched_assets = [path for path in assets if patch_asset(path)]
-if not patched_assets:
-    raise SystemExit("Selkies audio initialization marker was not found")
+    for asset in assets:
+        if not patch_asset(asset):
+            raise SystemExit(f"Unable to patch Selkies audio initialization in {asset}")
+        print(f"Patched Selkies audio resume handling: {asset}")
 
-for asset in patched_assets:
-    print(f"Patched Selkies audio resume handling: {asset}")
+
+if __name__ == "__main__":
+    main()

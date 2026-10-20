@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Restart Container
+Exec=/usr/local/bin/project-container-action restart
+Icon=system-reboot
+Terminal=false
