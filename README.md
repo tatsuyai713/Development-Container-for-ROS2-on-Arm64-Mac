@@ -54,6 +54,7 @@ For an existing installation, go to **Daily use**.
 | macOS | 26 or later |
 | Apple container | Project validation used 1.2.2; installation is covered below |
 | Python | Python 3.9 or later on the Mac |
+| Developer tools | Apple Command Line Tools to compile the small Save helper once |
 | Memory | 16 GB or more recommended |
 | Disk | Tens of gigabytes for the development image and build cache, plus additional space for saved images |
 | Network | Internet access for image and package downloads |
@@ -69,6 +70,8 @@ python3 --version
 
 `uname -m` should report `arm64`. If Python is missing, install it from the
 [official Python website](https://www.python.org/downloads/macos/) before continuing.
+
+If Command Line Tools are missing, run `xcode-select --install` on the Mac and complete installation.
 
 This guide labels commands as either **Mac Terminal** or **Ubuntu terminal**.
 Run them in the specified place. Copy only the commands inside a code block, not explanatory
@@ -322,13 +325,18 @@ To restart:
 1. Save your open documents and source files in their applications.
 2. Double-click the icon.
 3. Read the confirmation and choose Yes to proceed, or No to cancel.
-4. Wait for the completion message. This can take several minutes; do not submit repeated saves.
-5. On success, the message shows the new image name and the archive location on the Mac.
+4. The same KDE progress dialog used by the reference implementation stays visible. Wait for completion; this can take several minutes. Do not submit repeated saves.
+5. On success, the message shows the new image name and archive location on the Mac. Failures open a detailed error dialog.
+
+**Container Status** remains available during a save. Stop, Restart, or another Save during an active operation returns a busy error; it is not queued to execute later.
 
 The save captures files, installed applications, and settings on disk. It does not restore open windows or running processes.
 Saving leaves the running desktop available and keeps the original image.
-The next `./start.sh --recreate` uses the latest successful save. Each save creates another
-image and archive, so disk usage increases.
+The next `./start.sh --recreate` uses the latest successful save.
+Save reuses existing layers and adds only new, changed, or deleted files. The first save builds a comparison index and can take longer.
+Subsequent saves of the same container use the previous saved image as their parent.
+Changed files are saved in full; this is a file-level changeset, not a byte-level patch within files.
+Each save creates an image reference and a delta archive, without duplicating unchanged parent layers.
 
 This is different from saving a document. Mounted Mac files and `/config` volume contents are
 not included in the saved image; they remain in their own storage locations.
@@ -553,11 +561,29 @@ the shared Mac directory itself.
 | Port is already in use | Stop the conflicting container or configure different ports |
 | Safari cannot type | Click the Ubuntu input field; reload the page and update the client as shown below |
 | Safari clipboard is denied | Check HTTPS, certificate trust, permission, and the error beside the buttons |
+| Windows App clipboard fails despite Bidirectional | Check Devices & Audio → Clipboard → Bidirectional, then fully quit Windows App as described below if necessary |
 | RDP has no sound | Enable playback on the local computer in the RDP client |
 | Management icons are missing or the Mac does not respond | Reinstall the desktop actions as shown below |
-| Save reports `could not read block` | Update the desktop actions; the fixed exporter falls back to a guest filesystem copy |
+| Save reports `could not read block` | Update desktop actions; this is the older full-export implementation. Incremental Save does not use native export |
+| Save reports missing Command Line Tools | Complete `xcode-select --install` on the Mac, then retry |
 | Save reports another operation is running | Wait for that operation to finish; do not submit repeated requests |
 | Disk usage grows | Check saved images, archives, and build cache |
+
+### Windows App clipboard stops responding
+
+Clipboard transfer can stop responding inside Windows App even with **Bidirectional** enabled.
+In an observed failure with this environment, channel negotiation succeeded but the client did not
+answer clipboard text requests. Fully quitting and restarting Windows App restored transfer;
+disconnecting and reconnecting alone did not.
+
+1. Save work in connected sessions. Quitting closes other RDP connections in Windows App too.
+2. From the Mac menu bar, choose **Windows App → Quit Windows App** (⌘Q). Closing only the connection window is not sufficient.
+3. Reopen Windows App and reconnect to Ubuntu.
+4. Copy fresh short text on the Mac, then use the Ubuntu application's right-click Paste command.
+5. Check the reverse direction too. Konsole uses Ctrl+Shift+C and Ctrl+Shift+V.
+
+You do not need to start by recreating the container or restoring an image for this symptom.
+If a full client restart does not help, investigate XRDP configuration, its channel process, and logs.
 
 Find the running container's name in **Mac Terminal**:
 
@@ -787,13 +813,22 @@ choose another container or supply arbitrary shell commands. New containers rece
 channel mount, including when Mac home sharing is disabled. Existing containers can use an existing
 host-home mount.
 
-Saving creates a single-layer OCI image: a flatten operation rather than Docker incremental commit
-or previous-layer merge. When native `container export` fails on a running container, GNU tar in the
-guest copies the filesystem while excluding all mounted contents and transient `/run` state and X locks.
-That fallback is a live file copy, not an atomic snapshot. Read and permission errors fail the save.
-Only a successful import and configuration verification update the image selected for recreation.
+Save retains the parent's OCI layers and appends one filesystem changeset layer.
+It indexes file contents and metadata in a read-only parent container once, then compares the running filesystem.
+Subsequent saves of the same container reuse the previous saved image and index. Unchanged files reuse cached hashes after checking inode, ctime, mtime, and size.
+The layer preserves contents, ownership, modes, timestamps, xattrs, and links; OCI whiteouts represent deletions.
+Mounted data and `/proc`, `/sys`, `/dev`, `/run`, `/tmp`, and `/config` are excluded.
+Files are read live; this is not an atomic or database-coordinated snapshot.
 
-Archives and runtime settings are kept under `~/.local/state/ros2-container-control/backups/` on the Mac.
+A small Mac helper uses the `imageLoad` XPC route verified with Apple container 1.2.2, without the CLI load command's eager full-rootfs unpack.
+Command Line Tools compile it once. Unsupported image-service protocols fail visibly rather than silently reverting to full export.
+Only verified configuration and parent/delta layer registration update the image selected for recreation.
+Normal filesystem unpacking still occurs when restoring an image that needs it.
+
+Delta archives, runtime settings, and filesystem indexes live under `~/.local/state/ros2-container-control/`.
+**A delta archive alone is not a complete portable backup:** its referenced parent layers must also be available.
+For a full portable backup, run `container image save --output /path/to/backup.tar <saved-image-name>` on the Mac.
+Previously saved full images remain usable.
 The image preserves its effective command, environment, user, working directory, and metadata.
 Published ports and mounts are runtime settings; use the saved project configuration and `start.sh`
 to restore them. For reproducible infrastructure, also describe added packages in `Containerfile`

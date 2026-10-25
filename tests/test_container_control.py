@@ -7,6 +7,8 @@ import hashlib
 import sys
 import fcntl
 import unittest
+import threading
+import time
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('control', Path(__file__).resolve().parents[1] / 'scripts/container-control.py')
@@ -15,6 +17,49 @@ spec.loader.exec_module(control)
 
 
 class ControlTests(unittest.TestCase):
+    def test_status_bypasses_operation_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary); locks = state / 'locks'; locks.mkdir()
+            with (locks / 'test.lock').open('a') as held:
+                fcntl.flock(held, fcntl.LOCK_EX)
+                with patch.object(control, 'dispatch_locked', return_value={'message': 'running'}) as dispatch:
+                    self.assertEqual(control.dispatch(state, 'container', 'test', 'status')['message'], 'running')
+                    dispatch.assert_called_once()
+
+    def test_save_does_not_block_status_or_queue_stop(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary); identifier = control.channel_id('test')
+            control.atomic_json(state / 'registry.json', {identifier: {'container': 'test'}})
+            channel = state / 'channels' / identifier
+            (channel / 'requests').mkdir(parents=True); (channel / 'responses').mkdir()
+            for letter, action in [('a', 'save'), ('b', 'stop'), ('c', 'status')]:
+                (channel / 'requests' / (letter * 32 + '.json')).write_text(json.dumps({'action': action}))
+            release = threading.Event()
+            def dispatch(state, cli, identifier, action):
+                if action == 'save':
+                    if not release.wait(5):
+                        raise RuntimeError('Test timed out waiting for release')
+                elif action == 'stop':
+                    raise AssertionError('Stop must not run after the save')
+                return {'message': action}
+            with patch.object(control, 'dispatch', side_effect=dispatch) as mocked:
+                server = threading.Thread(target=control.serve, args=(state, 'container', True))
+                server.start()
+                try:
+                    status = channel / 'responses' / ('c' * 32 + '.json')
+                    deadline = time.monotonic() + 3
+                    while not status.exists() and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertTrue(status.exists(), 'Status must return before Save completes')
+                    self.assertTrue(json.loads(status.read_text())['ok'])
+                    stop = json.loads((channel / 'responses' / ('b' * 32 + '.json')).read_text())
+                    self.assertFalse(stop['ok'])
+                    self.assertIn('not queued', stop['message'])
+                    self.assertEqual([call.args[3] for call in mocked.call_args_list], ['save', 'status'])
+                finally:
+                    release.set(); server.join(5)
+                self.assertFalse(server.is_alive())
+
     def test_duplicate_operation_is_rejected_without_dispatch(self):
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary); locks = state / 'locks'; locks.mkdir()
@@ -25,36 +70,12 @@ class ControlTests(unittest.TestCase):
                         control.dispatch(state, 'container', 'test', 'save')
                     dispatch.assert_not_called()
 
-    def test_guest_copy_excludes_mounts_and_boot_state(self):
-        with patch.object(control, 'run', return_value=json.dumps([['/config', True], ['/home/user/host_home', True], ['/etc/hosts', False]])):
-            command = control.guest_tar_command('container', 'test')
-        for option in ['--exclude=./config/*', '--exclude=./home/user/host_home/*',
-                       '--exclude=./etc/hosts', '--exclude=./run/*', '--exclude=./tmp/.X*-lock']:
-            self.assertIn(option, command)
-        self.assertIn('LANGUAGE=C', command)
-
-    def test_failed_native_stream_is_replaced_before_fallback(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); layer = root / 'layer.gz'
-            real_capture = control.capture_layer
-            def capture(command, path, allow_changed_files=False):
-                if command[1] == 'export':
-                    return real_capture([sys.executable, '-c', 'import sys;sys.stdout.write("bad partial export");sys.stderr.write("could not read block 614933");sys.exit(1)'], path)
-                return real_capture([sys.executable, '-c', 'print("valid replacement",end="")'], path)
-            with patch.object(control, 'capture_layer', side_effect=capture), patch.object(control, 'inspect_container', return_value={'status': {'state': 'running'}}), patch.object(control, 'guest_tar_command', return_value=['guest', 'tar']):
-                digest, method = control.export_layer('container', 'test', layer, root)
-            self.assertEqual(gzip.decompress(layer.read_bytes()), b'valid replacement')
-            self.assertEqual(digest, hashlib.sha256(b'valid replacement').hexdigest())
-            self.assertEqual(method, 'guest-tar')
-
-    def test_tar_read_errors_are_never_accepted(self):
+    def test_failed_delta_stream_is_not_accepted(self):
         with tempfile.TemporaryDirectory() as temporary:
             layer = Path(temporary) / 'layer.gz'
-            command = [sys.executable, '-c', 'import sys;sys.stderr.write("tar: ./data: Cannot read: Input/output error\\n");sys.exit(1)']
-            with self.assertRaises(RuntimeError):
-                control.capture_layer(command, layer, allow_changed_files=True)
-            command = [sys.executable, '-c', 'import sys;sys.stdout.write("data");sys.stderr.write("tar: ./log: file changed as we read it\\n");sys.exit(1)']
-            control.capture_layer(command, layer, allow_changed_files=True)
+            command = [sys.executable, '-c', 'import sys;sys.stdout.write("partial");sys.stderr.write("Cannot read: Input/output error");sys.exit(1)']
+            with self.assertRaisesRegex(RuntimeError, 'Input/output error'):
+                control.capture_layer(command, layer)
 
     def test_config_preserves_metadata_and_effective_command(self):
         original = {'architecture': 'arm64', 'os': 'linux', 'config': {
@@ -72,7 +93,7 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(result['config']['Entrypoint'], ['/bin/sleep'])
         self.assertEqual(result['config']['Cmd'], ['123'])
         self.assertEqual(result['config']['User'], '1000:1001')
-        self.assertEqual(result['rootfs']['diff_ids'], ['sha256:abc'])
+        self.assertEqual(result['rootfs']['diff_ids'], ['old', 'old2', 'sha256:abc'])
         self.assertEqual(original['config']['Env'], ['OLD=1'])
 
     def test_request_rejects_commands_and_symlinks(self):

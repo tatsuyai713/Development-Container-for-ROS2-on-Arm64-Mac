@@ -2,6 +2,7 @@
 """Host-side, per-container desktop actions for Apple container."""
 import argparse
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 import fcntl
 import gzip
@@ -25,7 +26,10 @@ ACTIONS = {'status', 'stop', 'restart', 'save'}
 
 
 def run(*args):
-    return subprocess.check_output(list(args), text=True, stderr=subprocess.PIPE)
+    try:
+        return subprocess.check_output(list(args), text=True, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(error.stderr.strip() or str(error)) from error
 
 
 def atomic_json(path, value):
@@ -90,8 +94,8 @@ def effective_config(base, record, diff_id):
         config['Entrypoint'] = [executable]
         config['Cmd'] = arguments
     result['created'] = dt.datetime.now(dt.timezone.utc).isoformat().replace('+00:00', 'Z')
-    result['rootfs'] = {'type': 'layers', 'diff_ids': ['sha256:' + diff_id]}
-    result['history'] = [{'created': result['created'], 'created_by': 'project: save single-layer container image'}]
+    result['rootfs'] = {'type': 'layers', 'diff_ids': list(base.get('rootfs', {}).get('diff_ids', [])) + ['sha256:' + diff_id]}
+    result['history'] = list(base.get('history', [])) + [{'created': result['created'], 'created_by': 'project: save incremental container changes'}]
     return result
 
 
@@ -102,7 +106,7 @@ def blob(root, value, media_type):
     return {'mediaType': media_type, 'digest': 'sha256:' + digest, 'size': len(data)}
 
 
-def capture_layer(command, layer, allow_changed_files=False):
+def capture_layer(command, layer):
     diff = hashlib.sha256()
     with tempfile.TemporaryFile() as errors:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors,
@@ -115,12 +119,7 @@ def capture_layer(command, layer, allow_changed_files=False):
             code = process.wait()
             errors.seek(0)
             messages = errors.read().decode(errors='replace')
-            # GNU tar returns 1 when a live file changes during the copy.
-            # Never accept permission, read, missing-file, or other errors.
-            benign_changes = bool(messages.strip()) and all(
-                line.endswith(('file changed as we read it', 'socket ignored'))
-                for line in messages.splitlines() if line.strip())
-            if code != 0 and not (allow_changed_files and code == 1 and benign_changes):
+            if code != 0:
                 raise RuntimeError(messages[-4000:] or f'Export exited with status {code}')
         finally:
             process.stdout.close()
@@ -130,99 +129,85 @@ def capture_layer(command, layer, allow_changed_files=False):
     return diff.hexdigest()
 
 
-def guest_tar_command(cli, name):
-    # Read mountpoints in the actual guest namespace, including mounts not
-    # present in the saved run configuration. Preserve directory entries, but
-    # exclude every mounted directory's contents and every mounted file.
-    discover = '''import json,os,re
-from pathlib import Path
-mounts=[]
-for line in Path('/proc/self/mountinfo').read_text().splitlines():
-    path=re.sub(r"\\\\([0-7]{3})",lambda m:chr(int(m[1],8)),line.split()[4])
-    if path!='/': mounts.append([path,os.path.isdir(path)])
-print(json.dumps(mounts))'''
-    mounts = json.loads(run(cli, 'exec', '--user', 'root', name, 'python3', '-c', discover))
-    command = [cli, 'exec', '--user', 'root', name,
-               'env', 'LC_ALL=C', 'LANG=C', 'LANGUAGE=C',
-               'tar', '--create', '--file=-', '--directory=/', '--format=pax',
-               '--numeric-owner', '--xattrs', '--acls', '--one-file-system', '--anchored']
-    # Runtime supervision state, session sockets, and X locks belong to the
-    # current boot and must not survive restoration into a new container.
-    command += ['--exclude=./run/*', '--exclude=./tmp/.X*-lock',
-                '--exclude=./tmp/.X11-unix/*', '--exclude=./tmp/.ICE-unix/*']
-    for mount, directory in mounts:
-        command.append('--exclude=.' + mount + ('/*' if directory else ''))
-    return command + ['.']
-
-
-def export_layer(cli, name, layer, destination):
-    try:
-        return capture_layer([cli, 'export', name], layer), 'container-export'
-    except RuntimeError as error:
-        if inspect_container(cli, name)['status']['state'] != 'running':
-            raise
-        atomic_json(destination / 'export-fallback.json', {'native_export_error': str(error)})
-        print('Native export failed; using guest filesystem copy with mounts excluded.', flush=True)
-        # capture_layer truncates the failed native export and starts a new hash.
-        return capture_layer(guest_tar_command(cli, name), layer, allow_changed_files=True), 'guest-tar'
-
-
-def save_image(cli, name, target, destination):
-    """Export without extracting files; build a valid single-layer OCI archive."""
+def save_image(cli, name, target, destination, state=None):
+    """Append only a filesystem changeset, retaining all immutable parent layers."""
+    # Import beside this script, including when loaded through importlib in tests.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('project_incremental_save', Path(__file__).with_name('incremental_save.py'))
+    incremental = importlib.util.module_from_spec(spec); spec.loader.exec_module(incremental)
+    started = time.monotonic()
     record = inspect_container(cli, name)
-    base = image_config(cli, record['configuration']['image']['reference'])
+    state = state or destination.parents[2]
+    identifier = channel_id(name)
+    channel = state / 'channels' / identifier
+    previous = registry(state).get(identifier, {}).get('last_save', {})
+    parent = record['configuration']['image']['reference']
+    if previous.get('source_identity') == incremental.source_identity(record):
+        parent = previous['image']
+    else:
+        expected = record['configuration']['image'].get('descriptor', {}).get('digest')
+        resolved = json.loads(run(cli, 'image', 'inspect', parent))[0]
+        if expected and resolved['configuration']['descriptor']['digest'] != expected:
+            raise RuntimeError('The running container image tag now points to a different image. Restore the original image tag before saving; no changes were committed.')
     destination.mkdir(parents=True, exist_ok=False)
     atomic_json(destination / 'runtime.json', record)
     archive = destination / 'image.oci.tar'
+    layer = destination / 'layer.gz'
     try:
+        diff, parent_manifest, base, index, exclusions = incremental.make_layer(
+            cli, name, record, parent, destination, state, channel, run, capture_layer)
         with tempfile.TemporaryDirectory(prefix='.save-', dir=destination) as temporary:
-            root = Path(temporary)
-            (root / 'blobs/sha256').mkdir(parents=True)
-            layer = root / 'layer.gz'
-            diff, export_method = export_layer(cli, name, layer, destination)
+            root = Path(temporary); (root / 'blobs/sha256').mkdir(parents=True)
             compressed_hash = hashlib.sha256()
             with layer.open('rb') as saved:
-                while chunk := saved.read(1024 * 1024):
-                    compressed_hash.update(chunk)
-            digest = compressed_hash.hexdigest()
-            size = layer.stat().st_size
+                while chunk := saved.read(1024 * 1024): compressed_hash.update(chunk)
+            digest = compressed_hash.hexdigest(); size = layer.stat().st_size
             layer.rename(root / 'blobs/sha256' / digest)
             config = effective_config(base, record, diff)
             config_desc = blob(root, config, 'application/vnd.oci.image.config.v1+json')
-            manifest = {
-                'schemaVersion': 2, 'mediaType': 'application/vnd.oci.image.manifest.v1+json',
-                'config': config_desc,
-                'layers': [{'mediaType': 'application/vnd.oci.image.layer.v1.tar+gzip',
-                            'digest': 'sha256:' + digest, 'size': size}],
-            }
+            manifest = {'schemaVersion': 2, 'mediaType': 'application/vnd.oci.image.manifest.v1+json',
+                        'config': config_desc, 'layers': parent_manifest['layers'] + [
+                            {'mediaType': 'application/vnd.oci.image.layer.v1.tar+gzip',
+                             'digest': 'sha256:' + digest, 'size': size}]}
             descriptor = blob(root, manifest, manifest['mediaType'])
             descriptor['platform'] = {'os': 'linux', 'architecture': 'arm64'}
-            descriptor['annotations'] = {
-                'io.containerd.image.name': target,
+            descriptor['annotations'] = {'io.containerd.image.name': target,
                 'org.opencontainers.image.ref.name': target.rsplit(':', 1)[-1],
-                'com.apple.containerization.image.name': target,
-            }
+                'com.apple.containerization.image.name': target}
             atomic_json(root / 'index.json', {'schemaVersion': 2, 'manifests': [descriptor]})
             atomic_json(root / 'oci-layout', {'imageLayoutVersion': '1.0.0'})
+            # A thin archive: parent blobs already in Apple's content store are
+            # referenced, never copied/compressed/imported again by Save.
             with tarfile.open(archive.with_suffix('.partial'), 'w') as output:
                 for path in sorted(root.rglob('*')):
-                    if path.is_file():
-                        output.add(path, arcname=str(path.relative_to(root)), recursive=False)
+                    if path.is_file(): output.add(path, arcname=str(path.relative_to(root)), recursive=False)
             archive.with_suffix('.partial').replace(archive)
-            run(cli, 'image', 'load', '--input', str(archive))
+            incremental.native_import(archive, state, run)
             loaded = image_config(cli, target)
             if loaded['config'] != config['config'] or loaded['rootfs'] != config['rootfs']:
                 raise RuntimeError('Saved image configuration verification failed')
-        result = {'image': target, 'archive': str(archive), 'export_method': export_method}
+            new_digest, new_manifest, new_config = incremental.manifest_for(cli, target, run)
+            if new_manifest['layers'] != manifest['layers']:
+                raise RuntimeError('Saved parent/delta layer verification failed')
+            key = hashlib.sha256(json.dumps([incremental.VERSION, new_digest, exclusions], sort_keys=True).encode()).hexdigest()
+            incremental.atomic_index(state / 'indexes' / (key + '.json'), index)
+        result = {'image': target, 'archive': str(archive), 'export_method': 'incremental',
+                  'parent_image': parent, 'delta_bytes': size, **index['stats'],
+                  'source_identity': incremental.source_identity(record),
+                  'elapsed_seconds': round(time.monotonic() - started, 3)}
         atomic_json(destination / 'result.json', result)
         return result
     except BaseException:
-        # Keep completed exports for recovery; discard only incomplete output.
         archive.with_suffix('.partial').unlink(missing_ok=True)
         raise
+    finally:
+        layer.unlink(missing_ok=True)
 
 
 def dispatch(state, cli, identifier, action):
+    # Status must remain available while a potentially long image save runs.
+    if action == 'status':
+        return dispatch_locked(state, cli, identifier, action)
     locks = state / 'locks'
     locks.mkdir(parents=True, exist_ok=True)
     with (locks / (identifier + '.lock')).open('a') as lock:
@@ -254,10 +239,10 @@ def dispatch_locked(state, cli, identifier, action):
         raise ValueError('Unsupported action')
     stamp = dt.datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
     target = record['base_image'].rsplit(':', 1)[0] + ':saved-' + stamp
-    result = save_image(cli, name, target, state / 'backups' / identifier / stamp)
+    result = save_image(cli, name, target, state / 'backups' / identifier / stamp, state=state)
     # Reread: installation of another channel may have updated the registry.
     update_registry(state, lambda records: records[identifier].update(saved_image=target, last_save=result))
-    return dict(result, message='Saved and verified a single-layer image. It will be used on the next recreation.')
+    return dict(result, message='Saved and verified the container changes as a new image layer. It will be used on the next recreation.')
 
 
 def read_request(path):
@@ -272,8 +257,29 @@ def read_request(path):
     return request['action']
 
 
+def process_request(state, cli, identifier, path, claimed):
+    try:
+        action = read_request(claimed)
+        result = dispatch(state, cli, identifier, action)
+        response = dict(result, ok=True)
+    except Exception as error:
+        response = {'ok': False, 'message': str(error)}
+        print(f'Container action failed: {error}', file=sys.stderr, flush=True)
+    atomic_json(path.parent.parent / 'responses' / path.name, response)
+    claimed.unlink(missing_ok=True)
+
+
 def serve(state, cli, once=False):
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        serve_requests(state, cli, workers, once)
+
+
+def serve_requests(state, cli, workers, once):
+    pending = []
+    active = {}
     while True:
+        pending = [future for future in pending if not future.done()]
+        active = {key: future for key, future in active.items() if not future.done()}
         for identifier in registry(state):
             if not re.fullmatch('[a-f0-9]{24}', identifier):
                 continue
@@ -288,13 +294,19 @@ def serve(state, cli, once=False):
                 try:
                     path.rename(claimed)
                     action = read_request(claimed)
-                    result = dispatch(state, cli, identifier, action)
-                    response = dict(result, ok=True)
+                    if action != 'status' and identifier in active:
+                        raise RuntimeError('Another operation is running for this container. Wait for it to finish, then try again. This request was not queued.')
+                    if len(pending) >= 4:
+                        raise RuntimeError('Container management is busy. Please try again shortly. This request was not queued.')
+                    future = workers.submit(process_request, state, cli, identifier, path, claimed)
+                    pending.append(future)
+                    if action != 'status':
+                        active[identifier] = future
                 except Exception as error:
                     response = {'ok': False, 'message': str(error)}
                     print(f'Container action failed: {error}', file=sys.stderr, flush=True)
-                atomic_json(responses / path.name, response)
-                claimed.unlink(missing_ok=True)
+                    atomic_json(responses / path.name, response)
+                    claimed.unlink(missing_ok=True)
         if once:
             return
         time.sleep(0.5)
@@ -407,7 +419,7 @@ def main():
     elif args.command == 'action':
         print(json.dumps(dispatch(state, args.container_cli, channel_id(args.name), args.action), indent=2))
     elif args.command == 'save':
-        print(json.dumps(save_image(args.container_cli, args.name, args.target, args.destination), indent=2))
+        print(json.dumps(save_image(args.container_cli, args.name, args.target, args.destination, state=state), indent=2))
 
 
 if __name__ == '__main__':
