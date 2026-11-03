@@ -794,6 +794,16 @@ target frame rate. Retina device pixel ratio does not override the configured DP
 display to the available space while preserving its aspect ratio; it does not increase the Ubuntu
 resolution or encoding workload. This keeps the configured frame rate and desktop effects intact.
 RDP has a separate desktop whose size is selected in the RDP client.
+The browser stream disables WebSocket compression: H.264 video and Opus audio are already
+compressed, so compressing them again wastes CPU without improving picture quality. This does
+not change `FRAMERATE`, resolution, or desktop effects. When no image build is running, you can
+also stop the separate build VM with `container builder stop`; it is not needed for desktop use.
+The next `container build` starts the builder when needed.
+Browser streaming uses changed-region H.264 encoding (`x264enc-striped`). Resolution, target FPS,
+CRF quality and desktop effects are unchanged. After a browser resize or a canvas buffer resize,
+the client requests keyframes for every region to restore the complete screen. Requests wait
+600 ms for resizing to settle; static areas otherwise retain their last image. Full-screen motion
+still increases CPU load. RDP is independent of this browser streaming mode.
 
 ### Ports and storage
 

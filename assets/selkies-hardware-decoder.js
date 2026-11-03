@@ -3,6 +3,31 @@
 (() => {
   if (globalThis.ProjectVideoDecoder || !globalThis.VideoDecoder) return;
   const NativeDecoder = globalThis.VideoDecoder;
+  // A resized canvas loses its pixels, including stripes which are currently
+  // static. Ask for a complete set of keyframes after layout has settled.
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    let refreshTimer;
+    const refresh = () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        if (document.hidden) return;
+        const canvas = document.getElementById('videoCanvas');
+        if (!canvas || !canvas.width || !canvas.height) return;
+        try { window.webrtcInput?.send('REFRESH_VIDEO'); } catch (_) {}
+      }, 600);
+    };
+    window.addEventListener('resize', refresh);
+    window.visualViewport?.addEventListener('resize', refresh);
+    document.addEventListener('fullscreenchange', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    if (typeof MutationObserver !== 'undefined') {
+      new MutationObserver(records => {
+        if (records.some(record => record.target.id === 'videoCanvas' &&
+            ['width', 'height'].includes(record.attributeName))) refresh();
+      }).observe(document.documentElement, {subtree: true, attributes: true,
+        attributeFilter: ['width', 'height']});
+    }
+  }
   function codecFromChunk(chunk, fallback) {
     const data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);

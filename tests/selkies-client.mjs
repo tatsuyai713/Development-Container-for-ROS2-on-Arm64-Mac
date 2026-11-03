@@ -163,3 +163,39 @@ console.log('Decoder, Safari clipboard, and keyboard/IME non-interference checks
   c.document.fire('mousedown', {target: local});
   assert.equal(c.document.activeElement, local, 'Local form fields must keep focus');
 }
+
+// Fixed-resolution local resizing must repaint static stripes after a canvas
+// clear. Coalesce resize bursts and refresh only the visible video canvas.
+{
+  const listeners = {}, timers = new Map(), sent = [];
+  let nextTimer = 0, observe;
+  const canvas = {id: 'videoCanvas', width: 1920, height: 1080};
+  const document = {hidden: false, documentElement: {},
+    getElementById: id => id === canvas.id ? canvas : null,
+    addEventListener: (event, fn) => { listeners[event] = fn; }};
+  const window = {webrtcInput: {send: message => sent.push(message)},
+    addEventListener: (event, fn) => { listeners[event] = fn; },
+    visualViewport: {addEventListener: (event, fn) => { listeners['viewport-' + event] = fn; }}};
+  class MutationObserver {
+    constructor(fn) { observe = fn; }
+    observe() {}
+  }
+  const context = vm.createContext({VideoDecoder: class {}, EventTarget, window, document,
+    MutationObserver, setTimeout: fn => { timers.set(++nextTimer, fn); return nextTimer; },
+    clearTimeout: id => timers.delete(id)});
+  vm.runInContext(decoderSource, context);
+  const flush = () => { const work = [...timers.values()]; timers.clear(); work.forEach(fn => fn()); };
+  listeners.resize(); listeners.resize(); listeners['viewport-resize']();
+  assert.equal(timers.size, 1); flush();
+  assert.deepEqual(sent, ['REFRESH_VIDEO']);
+  observe([{target: canvas, attributeName: 'height'}]); flush();
+  assert.equal(sent.length, 2);
+  assert.equal(canvas.width, 1920); assert.equal(canvas.height, 1080);
+  observe([{target: {id: 'other'}, attributeName: 'height'}]);
+  assert.equal(timers.size, 0);
+  document.hidden = true; listeners.resize(); flush();
+  assert.equal(sent.length, 2);
+  document.hidden = false; listeners.visibilitychange(); flush();
+  assert.equal(sent.length, 3);
+}
+console.log('Resize and canvas-clear full refresh checks passed.');

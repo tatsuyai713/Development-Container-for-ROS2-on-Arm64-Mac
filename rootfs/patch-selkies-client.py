@@ -26,6 +26,72 @@ def patch_input_handler(path: Path) -> None:
         path.write_text(patched)
 
 
+def patch_stream_transport(path: Path) -> None:
+    # H.264 and Opus are already compressed. Negotiating permessage-deflate
+    # adds CPU work at both ends without changing media quality or frame rate.
+    source = path.read_text()
+    old = 'ws = web.WebSocketResponse()'
+    new = 'ws = web.WebSocketResponse(compress=False)'
+    if new in source:
+        return
+    if source.count(old) != 1:
+        raise SystemExit(f'Unsupported Selkies WebSocket constructor: {path}')
+    patched = source.replace(old, new, 1)
+    compile(patched, str(path), 'exec')
+    path.write_text(patched)
+
+
+def patch_damage_encoding(path: Path) -> None:
+    """Use the existing stripe protocol with resize-triggered full refresh."""
+    source = path.read_text()
+    if '# project-damage-encoding' in source:
+        return
+    replacements = {
+        'ENCODER_TYPE="x264enc"':
+            '# project-damage-encoding\nENCODER_TYPE="x264enc-striped"',
+        'CMD_OPTS+=(--h264-streaming-mode=true)':
+            'CMD_OPTS+=(--h264-streaming-mode="false|locked")',
+        'echo "[svc-selkies] H.264 streaming mode enabled for low latency"':
+            'echo "[svc-selkies] Changed-region H.264 encoding enabled; configured FPS retained"',
+    }
+    for old, new in replacements.items():
+        if source.count(old) != 1:
+            raise SystemExit(f'Unsupported Selkies encoding settings: {path}: {old}')
+        source = source.replace(old, new, 1)
+    path.write_text(source)
+
+
+def patch_resize_refresh(path: Path) -> None:
+    source = path.read_text()
+    if '# project-resize-refresh' in source:
+        return
+    old = '                    elif message == "START_VIDEO":'
+    new = '''                    elif message == "REFRESH_VIDEO":
+                        # project-resize-refresh: resend every stripe after a
+                        # client canvas resize, without changing desktop size.
+                        refresh_id = client_display_id or "primary"
+                        now = time.monotonic()
+                        last = getattr(self, "_project_refresh_times", {})
+                        capture = self.capture_instances.get(refresh_id, {}).get("module")
+                        if capture and now - last.get(refresh_id, 0) >= 0.5:
+                            last[refresh_id] = now
+                            self._project_refresh_times = last
+                            if hasattr(capture, "request_idr_frame"):
+                                capture.request_idr_frame()
+                                data_logger.info("Full repaint requested for %s", refresh_id)
+                            else:
+                                await self.reconfigure_displays()
+
+''' + old
+    if source.count(old) != 1:
+        raise SystemExit(f'Unsupported Selkies refresh handler: {path}')
+    source = source.replace(old, new, 1)
+    source = source.replace('                            "START_VIDEO",',
+                            '                            "START_VIDEO",\n                            "REFRESH_VIDEO",', 1)
+    compile(source, str(path), 'exec')
+    path.write_text(source)
+
+
 def patch_display_settings(path: Path) -> None:
     """Use the configured desktop size, including in existing saved images."""
     source = path.read_text()
@@ -193,11 +259,13 @@ def patch_nginx_cache(path: Path) -> None:
 
 def main() -> None:
     patch_display_settings(Path('/etc/s6-overlay/s6-rc.d/svc-selkies/run'))
+    patch_damage_encoding(Path('/etc/s6-overlay/s6-rc.d/svc-selkies/run'))
     # s6 copies service definitions into /run at boot. Update that copy too
     # when applying the fixes to an already running container.
     runtime_service = Path('/run/service/svc-selkies/run')
     if runtime_service.exists():
         patch_display_settings(runtime_service)
+        patch_damage_encoding(runtime_service)
     # The base init-nginx recreates this site before invoking this patch.
     # Revalidate the HTML as well as the versioned JavaScript bundles.
     for path in sorted({p.resolve() for folder in ('sites-available', 'sites-enabled', 'conf.d')
@@ -205,6 +273,9 @@ def main() -> None:
         patch_nginx_cache(path)
     for path in Path('/opt/selkies-env/lib').glob('python*/site-packages/selkies/input_handler.py'):
         patch_input_handler(path)
+    for path in Path('/opt/selkies-env/lib').glob('python*/site-packages/selkies/selkies.py'):
+        patch_stream_transport(path)
+        patch_resize_refresh(path)
     roots = sorted({p.parent.resolve() for p in ROOTS.rglob('index.html')
                     if (p.parent / 'assets').is_dir() or (p.parent / 'src').is_dir()})
     if not roots:
