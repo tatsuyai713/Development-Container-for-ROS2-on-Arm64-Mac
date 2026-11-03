@@ -560,6 +560,7 @@ source install/setup.bash
 | Safariで文字を入力できない | Ubuntuの入力欄をクリック。古い画面ならページを再読み込みし、下記のクライアント更新を実行 |
 | Safariのコピー操作が拒否される | HTTPS・証明書の信頼・Safariのクリップボード許可と、ボタン横のエラーを確認 |
 | Windows Appで双方向設定なのにコピペできない | 接続先のDevices & AudioでClipboardをBidirectionalに設定。改善しなければ、下記のWindows App完全終了を試す |
+| RDPの時計が9時間ずれる | 古い環境はシステム側がUTCのままの場合がある。`./update-client.sh <コンテナ名>`で起動設定のタイムゾーンをシステムにも反映 |
 | RDPで音が出ない | RDPクライアントでMac側への音声再生を有効にする |
 | 管理アイコンがない・Macが応答しない | 下記の管理機能の再導入を実行。コンテナは起動した状態にする |
 | Saveで`could not read block`と出る | 古い全体保存の実装。`desktop-actions.sh`で管理機能を更新する。現在の差分保存は標準exportを使わない |
@@ -742,6 +743,7 @@ Google公式の`google-chrome-stable_current_arm64.deb`を取得し、パッケ�
 `--non-interactive`では保存設定を再利用します。
 実行設定は、初回または`--reconfigure`時だけウィザードで質問します。
 タイムゾーンはMacから検出し、取得できない場合は`UTC`です。
+起動時に`TZ`だけでなく`/etc/localtime`と`/etc/timezone`にも反映するため、環境変数を引き継がないRDPセッションでもブラウザと同じ時刻を表示します。
 
 独自のベースイメージやキャッシュなしビルドを使う場合：
 
@@ -786,6 +788,9 @@ ARM64のCPU仮想化やNEON等のCPU命令は利用できます。
 個々の効果はKDEのシステム設定で選択できます。高解像度・高フレームレート・重い効果はCPU負荷を増やします。
 `DPI`は文字・フォントの倍率、`STREAM_SCALE`は配信映像の寸法、`FRAMERATE`は目標フレームレートです。
 Retinaブラウザのdevice pixel ratioでは設定済みDPIを上書きしません。
+`RESOLUTION`はブラウザ用Ubuntuデスクトップの解像度です。ブラウザのウィンドウを変更すると、
+縦横比を保ったまま表示だけを自動で拡大・縮小します。Ubuntuの解像度と映像処理の画素数は増えません。
+設定済みFPSとデスクトップ効果は維持されます。RDPは別のデスクトップで、サイズはRDPクライアント側で指定します。
 
 ### ポートと共有
 

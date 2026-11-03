@@ -127,7 +127,7 @@
     bar.id = 'safari-clipboard-toolbar';
     bar.addEventListener('mousedown', event => event.preventDefault());
     bar.setAttribute('aria-label', 'Session clipboard');
-    bar.style.cssText = 'position:fixed;right:10px;bottom:48px;z-index:9999;display:flex;gap:8px;padding:6px;background:rgba(0,0,0,.65);border-radius:6px;font:12px sans-serif';
+    bar.style.cssText = 'position:fixed;right:10px;top:10px;z-index:9999;display:flex;gap:8px;padding:6px;background:rgba(0,0,0,.65);border-radius:6px;font:12px sans-serif';
     const paste = document.createElement('button');
     paste.type = 'button';
     paste.setAttribute('class', 'allow-native-input');

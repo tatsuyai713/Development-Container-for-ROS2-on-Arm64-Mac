@@ -69,6 +69,7 @@ COPY assets/kubuntu-kdeglobals /tmp/kubuntu-kdeglobals
 COPY assets/home.desktop /tmp/home.desktop
 COPY assets/trash.desktop /tmp/trash.desktop
 COPY assets/xrdp-session.sh /usr/local/share/xrdp-session.sh
+COPY rootfs/custom-cont-init.d/40-timezone /custom-cont-init.d/40-timezone
 COPY rootfs/custom-cont-init.d/50-xrdp /custom-cont-init.d/50-xrdp
 COPY rootfs/s6-overlay/ /etc/s6-overlay/
 COPY assets/container-action.py /usr/local/bin/project-container-action
@@ -87,6 +88,7 @@ RUN --mount=type=secret,id=user_password,required=true \
 RUN chmod 755 \
     /usr/local/bin/project-container-action \
     /usr/local/share/xrdp-session.sh \
+    /custom-cont-init.d/40-timezone \
     /custom-cont-init.d/50-xrdp \
     /etc/s6-overlay/s6-rc.d/svc-xrdp-sesman/run \
     /etc/s6-overlay/s6-rc.d/svc-xrdp/run

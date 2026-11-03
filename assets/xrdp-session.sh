@@ -1,6 +1,10 @@
 #!/bin/sh
 unset DBUS_SESSION_BUS_ADDRESS
 unset SESSION_MANAGER
+if [ -z "${TZ:-}" ] && [ -r /etc/timezone ]; then
+  IFS= read -r TZ < /etc/timezone
+  export TZ
+fi
 export XDG_CURRENT_DESKTOP=KDE
 export XDG_SESSION_DESKTOP=KDE
 export DESKTOP_SESSION=plasma

@@ -26,6 +26,30 @@ def patch_input_handler(path: Path) -> None:
         path.write_text(patched)
 
 
+def patch_display_settings(path: Path) -> None:
+    """Use the configured desktop size, including in existing saved images."""
+    source = path.read_text()
+    marker = '# project-configured-resolution'
+    if marker in source:
+        return
+    header, rest = source.split('\n', 1)
+    settings = '''
+# project-configured-resolution
+# CUSTOM_RESOLUTION is provided by start.sh; let Selkies publish and lock the
+# manual dimensions so browser window size and stored client settings agree.
+project_resolution=${CUSTOM_RESOLUTION:-${DISPLAY_WIDTH:-1920}x${DISPLAY_HEIGHT:-1080}}
+if [[ "$project_resolution" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+  export SELKIES_MANUAL_WIDTH="${BASH_REMATCH[1]}"
+  export SELKIES_MANUAL_HEIGHT="${BASH_REMATCH[2]}"
+  export SELKIES_IS_MANUAL_RESOLUTION_MODE="true|locked"
+else
+  echo "Invalid CUSTOM_RESOLUTION: $project_resolution" >&2
+  exit 1
+fi
+'''
+    path.write_text(header + '\n' + settings + '\n' + rest)
+
+
 def patch_keyboard_assist(source: str) -> str:
     # Window capture already forwarded these events. Never inject Enter a
     # second time from the textarea's target listener, or forward IME confirm.
@@ -34,6 +58,23 @@ def patch_keyboard_assist(source: str) -> str:
     return re.sub(pattern, lambda m: m['head'] + 'if(' + m['event'] + '[' +
         m['remote'] + '._EVENT_MARKER]||' + m['event'] + '.isComposing||' +
         m['event'] + '.keyCode===229)return;', source)
+
+
+def patch_local_scaling(source: str) -> str:
+    # Keep the native manual-mode resize listeners and pointer mapping, but
+    # always fit the fixed-resolution canvas/video to its parent viewport.
+    def fit(match):
+        body = match[0]
+        if 'Applied manual style (Scaled)' not in body or 'project-local-fit' in body:
+            return body
+        start = body.index('{') + 1
+        return body[:start] + '/*project-local-fit*/' + match[1] + '=true;' + body[start:]
+    source = re.sub(
+        r'function\s+[$\w]+\([$\w]+,[$\w]+,([$\w]+)\)\{.*?(?=function\s|\Z)',
+        fit, source, flags=re.S)
+    # Some base clients refer to a missing variable in their video-mode
+    # server-settings handler. Local fitting is always enabled here.
+    return re.sub(r',scaleLocallyManual\)', ',true)', source)
 
 
 def patch_clipboard_receive(source: str) -> str:
@@ -54,6 +95,10 @@ def patch_root(root: Path, assets: Path = ASSETS) -> None:
     found = False
     for path in scripts:
         source = path.read_text()
+        fitted = patch_local_scaling(source)
+        if fitted != source:
+            path.write_text(fitted)
+            source = fitted
         # The base image's Safari focus/keyboard snippet bypasses balanced
         # key tracking. Replace it with the single project keyboard owner.
         legacy = '\n// selkies-safari-keyboard-fix (selkies-core)'
@@ -147,6 +192,12 @@ def patch_nginx_cache(path: Path) -> None:
 
 
 def main() -> None:
+    patch_display_settings(Path('/etc/s6-overlay/s6-rc.d/svc-selkies/run'))
+    # s6 copies service definitions into /run at boot. Update that copy too
+    # when applying the fixes to an already running container.
+    runtime_service = Path('/run/service/svc-selkies/run')
+    if runtime_service.exists():
+        patch_display_settings(runtime_service)
     # The base init-nginx recreates this site before invoking this patch.
     # Revalidate the HTML as well as the versioned JavaScript bundles.
     for path in sorted({p.resolve() for folder in ('sites-available', 'sites-enabled', 'conf.d')

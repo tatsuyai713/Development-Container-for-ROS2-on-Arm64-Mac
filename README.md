@@ -562,6 +562,7 @@ the shared Mac directory itself.
 | Safari cannot type | Click the Ubuntu input field; reload the page and update the client as shown below |
 | Safari clipboard is denied | Check HTTPS, certificate trust, permission, and the error beside the buttons |
 | Windows App clipboard fails despite Bidirectional | Check Devices & Audio → Clipboard → Bidirectional, then fully quit Windows App as described below if necessary |
+| RDP clock is nine hours behind Japan time | Older images may still use UTC as the system timezone. Run `./update-client.sh <container-name>` to apply the runtime timezone system-wide |
 | RDP has no sound | Enable playback on the local computer in the RDP client |
 | Management icons are missing or the Mac does not respond | Reinstall the desktop actions as shown below |
 | Save reports `could not read block` | Update desktop actions; this is the older full-export implementation. Incremental Save does not use native export |
@@ -743,6 +744,7 @@ require `vaMapBuffer2`, which Jammy's libva does not provide. Ubuntu 24.04 uses 
 Interactive builds call `configure.sh --build` and reset build questions to project defaults.
 `--non-interactive` reuses saved values. The runtime wizard runs only for first-time configuration
 or `--reconfigure`. Time zone defaults to the Mac setting, with `UTC` as a fallback.
+Startup updates `/etc/localtime` and `/etc/timezone` as well as `TZ`, so RDP sessions that do not inherit environment variables use the same timezone as the browser desktop.
 
 One-off custom base image:
 
@@ -788,6 +790,10 @@ GPU rendering inside Ubuntu.
 controlled in KDE settings. Higher resolution, frame rate, and heavier effects increase CPU work.
 `DPI` controls text scaling, `STREAM_SCALE` controls streamed dimensions, and `FRAMERATE` controls the
 target frame rate. Retina device pixel ratio does not override the configured DPI.
+`RESOLUTION` fixes the Ubuntu browser desktop size. Resizing the browser automatically fits the
+display to the available space while preserving its aspect ratio; it does not increase the Ubuntu
+resolution or encoding workload. This keeps the configured frame rate and desktop effects intact.
+RDP has a separate desktop whose size is selected in the RDP client.
 
 ### Ports and storage
 

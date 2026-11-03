@@ -21,6 +21,10 @@ path.write_bytes(sys.stdin.buffer.read())
 upload rootfs/patch-selkies-client.py /usr/local/libexec/patch-selkies-client.py
 upload assets/selkies-hardware-decoder.js /usr/local/share/project-selkies/selkies-hardware-decoder.js
 upload assets/selkies-safari-clipboard.js /usr/local/share/project-selkies/selkies-safari-clipboard.js
+upload rootfs/custom-cont-init.d/40-timezone /custom-cont-init.d/40-timezone
+
+# Also repair existing/saved images whose system timezone is still UTC.
+container exec "${CLIENT_CONTAINER}" sh -c 'chmod 755 /custom-cont-init.d/40-timezone && /custom-cont-init.d/40-timezone'
 
 # Base images refresh the dashboard on startup. Reapply after that refresh,
 # including on containers recreated from images built before these fixes.

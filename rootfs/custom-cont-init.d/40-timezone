@@ -1,0 +1,21 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+# XRDP/PAM starts a clean environment without the container's TZ variable.
+# Configure the system timezone too, so both desktops and their applications
+# use the selected runtime timezone.
+timezone=${TZ:-Etc/UTC}
+case "${timezone}" in
+  /*|*..*|*[!A-Za-z0-9_+/-]*)
+    echo "Invalid timezone name: ${timezone}" >&2
+    exit 1
+    ;;
+esac
+[[ -f "/usr/share/zoneinfo/${timezone}" ]] || {
+  echo "Timezone not installed: ${timezone}" >&2
+  exit 1
+}
+
+ln -snf "/usr/share/zoneinfo/${timezone}" /etc/localtime
+printf '%s\n' "${timezone}" > /etc/timezone
+echo "System timezone: ${timezone}"
